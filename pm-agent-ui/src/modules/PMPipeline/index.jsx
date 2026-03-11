@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-const API = "http://localhost:3001";
+const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
 const PROJECT_STAGES = [
   { id: "competitor",      icon: "🌐", label: "Competitor Intel",   color: "#FF8800", description: "Live web search · who's winning · gaps to exploit",       useWebSearch: true  },
