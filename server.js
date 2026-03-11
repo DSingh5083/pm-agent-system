@@ -12,8 +12,21 @@ dotenv.config();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const app = express();
 
+const ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  process.env.FRONTEND_URL,
+].filter(Boolean);
+
 app.use(cors({
-  origin: "http://localhost:5173",
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    // Allow any vercel.app subdomain + explicit allowlist
+    if (ALLOWED_ORIGINS.includes(origin) || /\.vercel\.app$/.test(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error("Not allowed by CORS: " + origin));
+  },
   methods: ["POST", "GET", "DELETE", "PATCH"],
   allowedHeaders: ["Content-Type"],
 }));
