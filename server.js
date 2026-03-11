@@ -3,11 +3,9 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
-import { runPipeline } from "./agents/orchestrator.js";
-import { runCompetitorAnalysis } from "./agents/competitor.js";
-import { runArchitecture } from "./agents/architecture.js";
-import { runFlow } from "./agents/flow.js";
-import { initDb, projectsDb, pipelineDb, chatDb } from "./db.js";
+import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb } from "./db.js";
+import { runStage } from "./agents/stageRunner.js";
+import { getStage } from "./stageRegistry.js";
 
 dotenv.config();
 
@@ -19,101 +17,362 @@ app.use(cors({
   methods: ["POST", "GET", "DELETE", "PATCH"],
   allowedHeaders: ["Content-Type"],
 }));
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PROJECTS
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatConstraints(constraints) {
+  if (!constraints || constraints.length === 0) return "";
+  const lines = constraints.map(c =>
+    `${c.severity.toUpperCase()}: [${c.type}] ${c.title} — ${c.description}`
+  );
+  return `PROJECT CONSTRAINTS (must be respected in all feature work):\n${lines.join("\n")}`;
+}
+
+// Serialise a context value — arrays/objects as JSON, strings as-is
+function serialise(val) {
+  if (typeof val === "string") return val;
+  return JSON.stringify(val, null, 2);
+}
+
+// Build a full human-readable context block from ctx object
+// No truncation — pass everything. Claude's context window handles it.
+function buildContextBlock(ctx) {
+  const parts = [];
+  if (ctx.projectName)        parts.push("PROJECT: " + ctx.projectName);
+  if (ctx.projectDescription) parts.push("DESCRIPTION: " + ctx.projectDescription);
+  if (ctx.featureName)        parts.push("FEATURE: " + ctx.featureName);
+  if (ctx.featureDescription) parts.push("FEATURE DESCRIPTION: " + ctx.featureDescription);
+  if (ctx.constraints)        parts.push(ctx.constraints);
+
+  // Prior stage outputs — full, no truncation
+  const stageKeys = Object.keys(ctx).filter(k =>
+    !["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers"].includes(k)
+  );
+  if (stageKeys.length > 0) {
+    parts.push("\n── PRIOR WORK ──");
+    stageKeys.forEach(k => {
+      const stage = getStage(k);
+      const label = stage ? stage.label.toUpperCase() : k.toUpperCase();
+      parts.push(`\n${label}:\n${serialise(ctx[k])}`);
+    });
+  }
+
+  if (ctx.briefing)         parts.push("\n── CONTEXT BRIEFING ──\n" + ctx.briefing);
+  if (ctx.interviewAnswers) parts.push("\n── CLARIFYING ANSWERS FROM USER ──\n" + ctx.interviewAnswers);
+
+  return parts.join("\n");
+}
+
+// Build context object for a project stage — NO truncation
+async function buildProjectContext(projectId, project) {
+  const [outputs, constraints] = await Promise.all([
+    projectOutputsDb.getAll(projectId),
+    constraintsDb.getAllForProject(projectId),
+  ]);
+  const ctx = {
+    projectName:        project.name,
+    projectDescription: project.description,
+    constraints:        formatConstraints(constraints),
+  };
+  outputs.forEach(o => {
+    try { ctx[o.stage_id] = JSON.parse(o.content); }
+    catch { ctx[o.stage_id] = o.content; }
+  });
+  return ctx;
+}
+
+// Build context object for a feature stage — NO truncation
+async function buildFeatureContext(featureId, feature, project) {
+  const [featureOutputs, projectOutputs, constraints] = await Promise.all([
+    featureOutputsDb.getAll(featureId),
+    projectOutputsDb.getAll(feature.project_id),
+    constraintsDb.getAllForProject(feature.project_id),
+  ]);
+  const ctx = {
+    projectName:        project.name,
+    projectDescription: project.description,
+    featureName:        feature.name,
+    featureDescription: feature.description,
+    constraints:        formatConstraints(constraints),
+  };
+  projectOutputs.forEach(o => {
+    try { ctx[o.stage_id] = JSON.parse(o.content); }
+    catch { ctx[o.stage_id] = o.content; }
+  });
+  featureOutputs.forEach(o => {
+    try { ctx[o.stage_id] = JSON.parse(o.content); }
+    catch { ctx[o.stage_id] = o.content; }
+  });
+  return ctx;
+}
+
+// ── Interview: generate 3-5 clarifying questions before a stage runs ─────────
+// Returns questions as a JSON array of strings.
+async function generateInterviewQuestions(stageId, ctx) {
+  const stage = getStage(stageId);
+  const contextBlock = buildContextBlock(ctx);
+
+  const prompt = `You are a senior PM preparing to generate a ${stage.label} for a product team.
+
+Before generating, you need to ask 3-5 sharp clarifying questions that would significantly improve the quality and specificity of the output.
+
+CURRENT CONTEXT:
+${contextBlock}
+
+Rules for your questions:
+- Only ask what is NOT already answered in the context above
+- Each question must be specific to THIS stage (${stage.label}) and THIS product
+- Ask about things that would make the output generic if unknown
+- No fluff questions — every question must materially change the output
+- If the context is already rich enough for a specific question, skip it
+
+Return ONLY a JSON array of question strings. No preamble, no markdown fences.
+Example: ["What is the primary monetisation model?", "Who is the decision maker in the buying process?"]`;
+
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 500,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const text = response.content[0].text.trim();
+  try {
+    const clean = text.replace(/```json|```/g, "").trim();
+    return JSON.parse(clean);
+  } catch {
+    // Fallback: extract anything that looks like a question
+    const lines = text.split("\n").filter(l => l.includes("?")).map(l => l.replace(/^[-*\d.]\s*/, "").trim());
+    return lines.length > 0 ? lines : ["What specific problem does this solve for the user?", "What does success look like in 3 months?"];
+  }
+}
+
+// ── Distillation: synthesise prior outputs into a structured briefing ─────────
+async function distillContext(stageId, ctx) {
+  const stage = getStage(stageId);
+  const stageKeys = Object.keys(ctx).filter(k =>
+    !["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers"].includes(k)
+  );
+
+  // No prior work to distil
+  if (stageKeys.length === 0) return null;
+
+  const priorWork = stageKeys.map(k => {
+    const label = getStage(k)?.label || k;
+    return `${label.toUpperCase()}:\n${serialise(ctx[k])}`;
+  }).join("\n\n");
+
+  const prompt = `You are preparing a structured briefing for a ${stage.label} generation.
+
+PRODUCT: ${ctx.projectName}
+${ctx.featureName ? "FEATURE: " + ctx.featureName : ""}
+
+PRIOR WORK COMPLETED:
+${priorWork}
+
+Create a tight briefing that extracts the most important context for writing a ${stage.label}. Include:
+
+## Key Decisions Already Made
+What has already been decided that the ${stage.label} must respect?
+
+## Established Facts
+Specific facts, numbers, names, and constraints already known.
+
+## What's Already Ruled Out
+Things explicitly out of scope or already rejected.
+
+## Critical Gaps
+What's still unknown that will most affect the ${stage.label}?
+
+Be specific. Use actual names, numbers, and terms from the prior work. No generic statements.`;
+
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 1000,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  return response.content[0].text;
+}
+
+// ── PROJECTS ──────────────────────────────────────────────────────────────────
 
 app.get("/projects", async (req, res) => {
   try { res.json(await projectsDb.getAll()); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/projects", async (req, res) => {
   try {
-    const { name, idea = "" } = req.body;
+    const { name, description = "" } = req.body;
     const id = randomUUID();
-    await projectsDb.create(id, name, idea);
+    await projectsDb.create(id, name, description);
     res.json(await projectsDb.getById(id));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.patch("/projects/:id", async (req, res) => {
   try {
-    const { name, idea } = req.body;
-    await projectsDb.update(req.params.id, name, idea);
+    await projectsDb.update(req.params.id, req.body.name, req.body.description ?? "");
     res.json(await projectsDb.getById(req.params.id));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete("/projects/:id", async (req, res) => {
-  try {
-    await projectsDb.delete(req.params.id);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  try { await projectsDb.delete(req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/projects/:id/pipeline", async (req, res) => {
+// ── CONSTRAINTS ───────────────────────────────────────────────────────────────
+
+app.get("/projects/:id/constraints", async (req, res) => {
+  try { res.json(await constraintsDb.getAllForProject(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/projects/:id/constraints", async (req, res) => {
   try {
-    const outputs = await pipelineDb.getAll(req.params.id);
+    const { type, title, description, severity } = req.body;
+    const c = await constraintsDb.create(randomUUID(), req.params.id, type, title, description, severity);
+    res.json(c);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch("/constraints/:id", async (req, res) => {
+  try {
+    await constraintsDb.update(req.params.id, req.body.type, req.body.title, req.body.description, req.body.severity);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/constraints/:id", async (req, res) => {
+  try { await constraintsDb.delete(req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── PROJECT OUTPUTS ───────────────────────────────────────────────────────────
+
+app.get("/projects/:id/outputs", async (req, res) => {
+  try {
+    const outputs = await projectOutputsDb.getAll(req.params.id);
     const map = {};
     outputs.forEach(o => {
-      try { map[o.stage] = JSON.parse(o.content); }
-      catch { map[o.stage] = o.content; }
+      try { map[o.stage_id] = JSON.parse(o.content); }
+      catch { map[o.stage_id] = o.content; }
     });
     res.json(map);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/projects/:id/pipeline/:stage", async (req, res) => {
+// Get interview questions for a project stage
+app.post("/projects/:id/interview/:stageId", async (req, res) => {
   try {
-    const { content } = req.body;
-    const stored = typeof content === "string" ? content : JSON.stringify(content);
-    await pipelineDb.save(randomUUID(), req.params.id, req.params.stage, stored);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const project = await projectsDb.getById(req.params.id);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const ctx       = await buildProjectContext(req.params.id, project);
+    const questions = await generateInterviewQuestions(req.params.stageId, ctx);
+    res.json({ questions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get("/projects/:id/chat", async (req, res) => {
-  try { res.json(await chatDb.getAll(req.params.id)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete("/projects/:id/chat", async (req, res) => {
+// Run a project stage (with optional interview answers)
+app.post("/projects/:id/run/:stageId", async (req, res) => {
   try {
-    await chatDb.clear(req.params.id);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const project = await projectsDb.getById(req.params.id);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const ctx = await buildProjectContext(req.params.id, project);
+
+    // Inject interview answers if provided
+    if (req.body.interviewAnswers) ctx.interviewAnswers = req.body.interviewAnswers;
+
+    // Distil prior context into a briefing
+    const briefing = await distillContext(req.params.stageId, ctx);
+    if (briefing) ctx.briefing = briefing;
+
+    const result = await runStage(req.params.stageId, ctx);
+    const stored = typeof result === "string" ? result : JSON.stringify(result);
+    await projectOutputsDb.save(randomUUID(), req.params.id, req.params.stageId, stored);
+    res.json({ result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PIPELINE AGENTS
-// ─────────────────────────────────────────────────────────────────────────────
+// ── FEATURES ──────────────────────────────────────────────────────────────────
 
-app.post("/run", async (req, res) => {
-  try { res.json(await runPipeline(req.body.idea)); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+app.get("/projects/:id/features", async (req, res) => {
+  try { res.json(await featuresDb.getAllForProject(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/competitor", async (req, res) => {
-  try { res.json({ result: await runCompetitorAnalysis(req.body.idea) }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+app.post("/projects/:id/features", async (req, res) => {
+  try {
+    const feature = await featuresDb.create(randomUUID(), req.params.id, req.body.name, req.body.description || "");
+    res.json(feature);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/architecture", async (req, res) => {
-  try { res.json({ result: await runArchitecture(req.body.idea) }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+app.patch("/features/:id", async (req, res) => {
+  try {
+    await featuresDb.update(req.params.id, req.body.name, req.body.description ?? "");
+    res.json(await featuresDb.getById(req.params.id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post("/flow", async (req, res) => {
-  try { res.json({ result: await runFlow(req.body.idea) }); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+app.delete("/features/:id", async (req, res) => {
+  try { await featuresDb.delete(req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// WRITING ENHANCER
-// ─────────────────────────────────────────────────────────────────────────────
+// ── FEATURE OUTPUTS ───────────────────────────────────────────────────────────
+
+app.get("/features/:id/outputs", async (req, res) => {
+  try {
+    const outputs = await featureOutputsDb.getAll(req.params.id);
+    const map = {};
+    outputs.forEach(o => {
+      try { map[o.stage_id] = JSON.parse(o.content); }
+      catch { map[o.stage_id] = o.content; }
+    });
+    res.json(map);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get interview questions for a feature stage
+app.post("/features/:id/interview/:stageId", async (req, res) => {
+  try {
+    const feature = await featuresDb.getById(req.params.id);
+    if (!feature) return res.status(404).json({ error: "Feature not found" });
+    const project   = await projectsDb.getById(feature.project_id);
+    const ctx       = await buildFeatureContext(req.params.id, feature, project);
+    const questions = await generateInterviewQuestions(req.params.stageId, ctx);
+    res.json({ questions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Run a feature stage (with optional interview answers)
+app.post("/features/:id/run/:stageId", async (req, res) => {
+  try {
+    const feature = await featuresDb.getById(req.params.id);
+    if (!feature) return res.status(404).json({ error: "Feature not found" });
+    const project = await projectsDb.getById(feature.project_id);
+
+    const ctx = await buildFeatureContext(req.params.id, feature, project);
+
+    // Inject interview answers if provided
+    if (req.body.interviewAnswers) ctx.interviewAnswers = req.body.interviewAnswers;
+
+    // Distil prior context into a briefing
+    const briefing = await distillContext(req.params.stageId, ctx);
+    if (briefing) ctx.briefing = briefing;
+
+    const result = await runStage(req.params.stageId, ctx);
+    const stored = typeof result === "string" ? result : JSON.stringify(result);
+    await featureOutputsDb.save(randomUUID(), req.params.id, req.params.stageId, stored);
+    res.json({ result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── WRITING ENHANCER ──────────────────────────────────────────────────────────
 
 app.post("/enhance", async (req, res) => {
   const { prompt, maxTokens = 3000 } = req.body;
@@ -124,69 +383,88 @@ app.post("/enhance", async (req, res) => {
       messages: [{ role: "user", content: prompt }],
     });
     res.json({ result: response.content[0].text });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PM CHAT
-// ─────────────────────────────────────────────────────────────────────────────
+// ── CHAT ──────────────────────────────────────────────────────────────────────
+
+app.get("/projects/:id/chat", async (req, res) => {
+  try { res.json(await chatDb.getAll(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/projects/:id/chat", async (req, res) => {
+  try { await chatDb.clear(req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 app.post("/chat", async (req, res) => {
-  const { messages, projectId, pipelineContext } = req.body;
+  const { messages, projectId, activeFeatureId } = req.body;
 
-  // Persist user message
   if (projectId && messages.length > 0) {
     const last = messages[messages.length - 1];
     if (last.role === "user") await chatDb.add(projectId, "user", last.content);
   }
 
-  // Build context block from pipeline outputs
-  let contextBlock = "";
-  if (pipelineContext && Object.keys(pipelineContext).length > 0) {
-    contextBlock = "\n\n━━━ CURRENT PROJECT CONTEXT ━━━";
-    if (pipelineContext.idea)         contextBlock += `\n\nFEATURE IDEA:\n${pipelineContext.idea}`;
-    if (pipelineContext.Competitor)   contextBlock += `\n\nCOMPETITOR ANALYSIS:\n${pipelineContext.Competitor}`;
-    if (pipelineContext.PRD)          contextBlock += `\n\nPRD:\n${pipelineContext.PRD}`;
-    if (pipelineContext.Architecture) contextBlock += `\n\nTECHNICAL ARCHITECTURE:\n${pipelineContext.Architecture}`;
-    if (pipelineContext.Flow)         contextBlock += `\n\nHIGH LEVEL FLOW:\n${pipelineContext.Flow}`;
-    if (pipelineContext.Review)       contextBlock += `\n\nSPEC REVIEW:\n${pipelineContext.Review}`;
-    if (pipelineContext.Tickets)      contextBlock += `\n\nTICKETS:\n${JSON.stringify(pipelineContext.Tickets, null, 2)}`;
-    if (pipelineContext.Roadmap)      contextBlock += `\n\nROADMAP:\n${pipelineContext.Roadmap}`;
-    contextBlock += "\n\n━━━ END CONTEXT ━━━\n";
-  }
+  let systemContext = "";
+  try {
+    const [project, projectOutputs, constraints] = await Promise.all([
+      projectsDb.getById(projectId),
+      projectOutputsDb.getAll(projectId),
+      constraintsDb.getAllForProject(projectId),
+    ]);
 
-  const systemPrompt = `You are a senior PM Assistant with 15 years of product management experience. You work embedded in a product team helping the PM think sharper, communicate better, and ship faster.
+    if (project) {
+      systemContext += "PROJECT: " + project.name;
+      if (project.description) systemContext += "\n" + project.description;
+    }
+    if (constraints.length > 0) systemContext += "\n\n" + formatConstraints(constraints);
+    if (projectOutputs.length > 0) {
+      systemContext += "\n\nPROJECT STRATEGY:";
+      projectOutputs.forEach(o => {
+        systemContext += "\n\n" + (getStage(o.stage_id)?.label || o.stage_id).toUpperCase() + ":\n" + o.content;
+      });
+    }
+    if (activeFeatureId) {
+      const [feature, featureOutputs] = await Promise.all([
+        featuresDb.getById(activeFeatureId),
+        featureOutputsDb.getAll(activeFeatureId),
+      ]);
+      if (feature) {
+        systemContext += "\n\nACTIVE FEATURE: " + feature.name;
+        if (feature.description) systemContext += "\n" + feature.description;
+        featureOutputs.forEach(o => {
+          systemContext += "\n\n" + (getStage(o.stage_id)?.label || o.stage_id).toUpperCase() + ":\n" + o.content;
+        });
+      }
+    }
+  } catch (e) { console.error("Context error:", e.message); }
 
-Deep expertise in: PRDs, user stories, acceptance criteria, stakeholder comms, RICE/MoSCoW prioritisation, sprint planning, roadmapping, competitor analysis, discovery, and retros.
+  const system = `You are a senior PM Assistant, 15 years experience. Direct, opinionated, pragmatic. Push back when needed. Reference specific details from the context — never give generic answers.
 
-Personality: Direct and opinionated. Ask sharp clarifying questions. Push back when something isn't thought through. Pragmatic — perfect is the enemy of shipped. Speak like a senior colleague.
-${contextBlock}
-When you have project context: reference it directly. Quote from the PRD. Point to specific tickets. Flag gaps. Give answers that feel like they're from someone who has read and understands this exact project.`;
+${systemContext}`;
 
   try {
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 2000,
-      system: systemPrompt,
+      system,
       messages,
     });
     const reply = response.content[0].text;
     if (projectId) await chatDb.add(projectId, "assistant", reply);
     res.json({ reply });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// START
-// ─────────────────────────────────────────────────────────────────────────────
+// ── START ─────────────────────────────────────────────────────────────────────
 
 initDb().then(() => {
   app.listen(3001, () => {
-    console.log("✅ PM Agent server running on http://localhost:3001");
-    console.log("🔑 API Key:", process.env.ANTHROPIC_API_KEY ? "loaded ✓" : "MISSING ✗");
-    console.log("🐘 Postgres:", process.env.DATABASE_URL || "not set");
+    console.log("PM Agent server running on http://localhost:3001");
+    console.log("API Key:", process.env.ANTHROPIC_API_KEY ? "loaded" : "MISSING");
   });
 }).catch(err => {
-  console.error("❌ Failed to init database:", err.message);
+  console.error("Failed to init database:", err.message);
   process.exit(1);
 });

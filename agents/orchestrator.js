@@ -1,7 +1,7 @@
 import { runPRDAgent } from "./prd.js";
 import { runReviewerAgent } from "./reviewer.js";
 import { runTicketWriterAgent } from "./ticketWriter.js";
-import { runStakeholderAgent } from "./stakeholderUpdate.js";
+import { runRoadmapAgent } from "./roadmap.js";
 
 export async function runPipeline(featureIdea) {
   console.log(`\n🚀 Starting PM Pipeline for: "${featureIdea}"\n`);
@@ -20,8 +20,8 @@ export async function runPipeline(featureIdea) {
   console.log(`\n✅ ${tickets.length} Tickets Created`);
 
   // Step 4: Roadmap
-   const roadmap = await runRoadmapAgent(featureIdea, tickets);
+  const roadmap = await runRoadmapAgent(featureIdea, tickets);
   console.log("\n✅ Roadmap Ready");
 
-  return { prd, reviewNotes, tickets, update };
+  return { prd, reviewNotes, tickets, roadmap };
 }
