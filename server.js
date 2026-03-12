@@ -42,15 +42,36 @@ function formatConstraints(constraints) {
   return `PROJECT CONSTRAINTS (must be respected in all feature work):\n${lines.join("\n")}`;
 }
 
+
 // Serialise a context value — arrays/objects as JSON, strings as-is
 function serialise(val) {
   if (typeof val === "string") return val;
   return JSON.stringify(val, null, 2);
 }
 
-// Build a full human-readable context block from ctx object
-// No truncation — pass everything. Claude's context window handles it.
-function buildContextBlock(ctx) {
+// Rough token estimator — 1 token ~ 4 chars
+function estimateTokens(str) { return Math.ceil((str || "").length / 4); }
+
+// Smart context builder with per-stage relevance filtering + token budget
+// Budget: 60k tokens for prior work (leaves room for prompt + 6k output)
+const META_KEYS = new Set(["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers"]);
+const STAGE_NEEDS = {
+  // Project stages — only need peer outputs for synthesis
+  competitor:      [],
+  market_analysis: ["competitor"],
+  roadmap:         ["competitor", "market_analysis"],
+  gtm:             ["competitor", "market_analysis", "roadmap"],
+  // Feature stages — what each stage actually reads
+  prd:             ["competitor", "market_analysis"],
+  architecture:    ["prd"],
+  flow:            ["prd", "architecture"],
+  ui_spec:         ["prd", "flow"],
+  diagram:         ["architecture", "flow"],
+  review:          ["prd", "architecture", "flow", "ui_spec"],
+  tickets:         ["prd", "architecture", "review"],
+};
+
+function buildContextBlock(ctx, stageId) {
   const parts = [];
   if (ctx.projectName)        parts.push("PROJECT: " + ctx.projectName);
   if (ctx.projectDescription) parts.push("DESCRIPTION: " + ctx.projectDescription);
@@ -58,17 +79,38 @@ function buildContextBlock(ctx) {
   if (ctx.featureDescription) parts.push("FEATURE DESCRIPTION: " + ctx.featureDescription);
   if (ctx.constraints)        parts.push(ctx.constraints);
 
-  // Prior stage outputs — full, no truncation
-  const stageKeys = Object.keys(ctx).filter(k =>
-    !["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers"].includes(k)
-  );
-  if (stageKeys.length > 0) {
-    parts.push("\n── PRIOR WORK ──");
-    stageKeys.forEach(k => {
-      const stage = getStage(k);
-      const label = stage ? stage.label.toUpperCase() : k.toUpperCase();
-      parts.push(`\n${label}:\n${serialise(ctx[k])}`);
-    });
+  // Determine which prior outputs to include
+  const needed  = stageId ? (STAGE_NEEDS[stageId] || []) : [];
+  const allKeys = Object.keys(ctx).filter(k => !META_KEYS.has(k));
+  
+  // If stage has defined needs, only include those. Otherwise include all.
+  const relevantKeys = needed.length > 0
+    ? allKeys.filter(k => needed.includes(k))
+    : allKeys;
+
+  if (relevantKeys.length > 0) {
+    const TOKEN_BUDGET = 60000;
+    let usedTokens = estimateTokens(parts.join("\n"));
+    const priorParts = [];
+
+    for (const k of relevantKeys) {
+      const label   = getStage(k)?.label?.toUpperCase() || k.toUpperCase();
+      const raw     = serialise(ctx[k]);
+      const tokens  = estimateTokens(raw);
+      const allowed = TOKEN_BUDGET - usedTokens;
+
+      if (allowed <= 500) break; // no budget left
+
+      // If it fits, use in full. If not, truncate to budget.
+      const text = tokens <= allowed ? raw : raw.slice(0, allowed * 4) + "\n...[truncated for context window]";
+      priorParts.push(`\n${label}:\n${text}`);
+      usedTokens += estimateTokens(text);
+    }
+
+    if (priorParts.length > 0) {
+      parts.push("\n── PRIOR WORK ──");
+      parts.push(...priorParts);
+    }
   }
 
   if (ctx.briefing)         parts.push("\n── CONTEXT BRIEFING ──\n" + ctx.briefing);
@@ -78,7 +120,7 @@ function buildContextBlock(ctx) {
 }
 
 // Build context object for a project stage — NO truncation
-async function buildProjectContext(projectId, project) {
+async function buildProjectContext(projectId, project, stageId) {
   const [outputs, constraints] = await Promise.all([
     projectOutputsDb.getAll(projectId),
     constraintsDb.getAllForProject(projectId),
@@ -96,7 +138,7 @@ async function buildProjectContext(projectId, project) {
 }
 
 // Build context object for a feature stage — NO truncation
-async function buildFeatureContext(featureId, feature, project) {
+async function buildFeatureContext(featureId, feature, project, stageId) {
   const [featureOutputs, projectOutputs, constraints] = await Promise.all([
     featureOutputsDb.getAll(featureId),
     projectOutputsDb.getAll(feature.project_id),
@@ -124,7 +166,7 @@ async function buildFeatureContext(featureId, feature, project) {
 // Returns questions as a JSON array of strings.
 async function generateInterviewQuestions(stageId, ctx) {
   const stage = getStage(stageId);
-  const contextBlock = buildContextBlock(ctx);
+  const contextBlock = buildContextBlock(ctx, stageId);
 
   const prompt = `You are a senior PM preparing to generate a ${stage.label} for a product team.
 
@@ -170,9 +212,16 @@ async function distillContext(stageId, ctx) {
   // No prior work to distil
   if (stageKeys.length === 0) return null;
 
+  // Cap each prior output at 3000 tokens (12000 chars) for the distillation input
+  // Distillation output is short (~800 tokens) so it's safe to pass forward in full
+  const TOKEN_CAP_PER_STAGE = 12000; // chars (~3000 tokens)
   const priorWork = stageKeys.map(k => {
     const label = getStage(k)?.label || k;
-    return `${label.toUpperCase()}:\n${serialise(ctx[k])}`;
+    const raw   = serialise(ctx[k]);
+    const text  = raw.length > TOKEN_CAP_PER_STAGE
+      ? raw.slice(0, TOKEN_CAP_PER_STAGE) + "\n...[truncated]"
+      : raw;
+    return `${label.toUpperCase()}:\n${text}`;
   }).join("\n\n");
 
   const prompt = `You are preparing a structured briefing for a ${stage.label} generation.
@@ -369,7 +418,7 @@ app.post("/features/:id/run/:stageId", async (req, res) => {
     if (!feature) return res.status(404).json({ error: "Feature not found" });
     const project = await projectsDb.getById(feature.project_id);
 
-    const ctx = await buildFeatureContext(req.params.id, feature, project);
+    const ctx = await buildFeatureContext(req.params.id, feature, project, req.params.stageId);
 
     // Inject interview answers if provided
     if (req.body.interviewAnswers) ctx.interviewAnswers = req.body.interviewAnswers;
@@ -432,10 +481,13 @@ app.post("/chat", async (req, res) => {
       if (project.description) systemContext += "\n" + project.description;
     }
     if (constraints.length > 0) systemContext += "\n\n" + formatConstraints(constraints);
+    // Cap each stage output at 6000 chars (~1500 tokens) for chat context
+    const CHAT_CAP = 6000;
     if (projectOutputs.length > 0) {
       systemContext += "\n\nPROJECT STRATEGY:";
       projectOutputs.forEach(o => {
-        systemContext += "\n\n" + (getStage(o.stage_id)?.label || o.stage_id).toUpperCase() + ":\n" + o.content;
+        const text = o.content.length > CHAT_CAP ? o.content.slice(0, CHAT_CAP) + "\n...[truncated]" : o.content;
+        systemContext += "\n\n" + (getStage(o.stage_id)?.label || o.stage_id).toUpperCase() + ":\n" + text;
       });
     }
     if (activeFeatureId) {
@@ -447,7 +499,8 @@ app.post("/chat", async (req, res) => {
         systemContext += "\n\nACTIVE FEATURE: " + feature.name;
         if (feature.description) systemContext += "\n" + feature.description;
         featureOutputs.forEach(o => {
-          systemContext += "\n\n" + (getStage(o.stage_id)?.label || o.stage_id).toUpperCase() + ":\n" + o.content;
+          const text = o.content.length > CHAT_CAP ? o.content.slice(0, CHAT_CAP) + "\n...[truncated]" : o.content;
+          systemContext += "\n\n" + (getStage(o.stage_id)?.label || o.stage_id).toUpperCase() + ":\n" + text;
         });
       }
     }

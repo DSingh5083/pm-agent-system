@@ -175,32 +175,141 @@ function InterviewModal({ stage, interviewEndpoint, runEndpoint, onComplete, onC
   );
 }
 
-// ── Description input ─────────────────────────────────────────────────────────
+// ── Project Brief (structured fields, auto-save on blur) ─────────────────────
 
-function DescriptionInput({ value, placeholder, color, onSave }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft]     = useState(value || "");
-  useEffect(() => { setDraft(value || ""); }, [value]);
-  const save = () => { onSave(draft.trim()); setEditing(false); };
+const BRIEF_FIELDS = [
+  { key: "product",  label: "Product",        placeholder: "What is it? One sentence tagline.",               required: true,  wide: false },
+  { key: "audience", label: "Target Audience", placeholder: "Who is this for? Be specific.",                   required: false, wide: false },
+  { key: "problem",  label: "Problem",         placeholder: "What problem does it solve?",                     required: true,  wide: true  },
+  { key: "goal",     label: "Business Goal",   placeholder: "What does success look like? Revenue, users...", required: false, wide: true  },
+  { key: "stack",    label: "Tech Stack",      placeholder: "e.g. React, Node, Postgres, AWS",                required: false, wide: false },
+];
 
-  if (!editing) {
-    return (
-      <div onClick={() => setEditing(true)} style={{ marginBottom: 18, padding: "11px 14px", background: "#fff", border: "1px dashed " + color + "55", borderRadius: 10, cursor: "text", minHeight: 44, display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ flex: 1, fontSize: 13, color: draft ? "#444" : "#bbb", lineHeight: 1.6, fontStyle: draft ? "normal" : "italic" }}>{draft || placeholder}</span>
-        <span style={{ fontSize: 10, color: color, fontWeight: 600, flexShrink: 0, background: color + "12", padding: "2px 7px", borderRadius: 8 }}>edit</span>
-      </div>
-    );
-  }
+function parseBrief(raw) {
+  if (!raw) return {};
+  try { const p = JSON.parse(raw); if (p && typeof p === "object") return p; } catch {}
+  return { product: raw };
+}
+
+function ProjectBrief({ value, onSave }) {
+  const [brief, setBrief] = useState(() => parseBrief(value));
+  const [saving, setSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState(null);
+
+  useEffect(() => { setBrief(parseBrief(value)); }, [value]);
+
+  const saveField = async (key, val) => {
+    const updated = { ...brief, [key]: val };
+    setBrief(updated);
+    setSaving(true);
+    await onSave(JSON.stringify(updated));
+    setSaving(false);
+    setLastSaved(new Date());
+  };
+
+  const filled   = BRIEF_FIELDS.filter(f => brief[f.key]?.trim()).length;
+  const isReady  = BRIEF_FIELDS.filter(f => f.required).every(f => brief[f.key]?.trim());
+
   return (
-    <div style={{ marginBottom: 18 }}>
-      <textarea autoFocus value={draft} onChange={e => setDraft(e.target.value)}
-        onKeyDown={e => { if (e.key === "Escape") { setDraft(value || ""); setEditing(false); } }}
-        placeholder={placeholder} rows={3}
-        style={{ width: "100%", background: "#fff", border: "1.5px solid " + color, borderRadius: 10, padding: "10px 14px", color: "#1a1a2a", fontSize: 13, fontFamily: "inherit", lineHeight: 1.6, resize: "none", outline: "none", boxSizing: "border-box" }}
+    <div style={{ marginBottom: 20, background: "#fff", border: "1.5px solid #0066FF22", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,102,255,0.05)" }}>
+
+      {/* Header */}
+      <div style={{ padding: "11px 18px", background: "#0066FF06", borderBottom: "1px solid #0066FF10", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a" }}>Project Brief</div>
+          <span style={{ fontSize: 10, fontFamily: "monospace", color: isReady ? "#00AA44" : "#FF8800", background: isReady ? "#00AA4412" : "#FF880012", padding: "1px 7px", borderRadius: 10 }}>
+            {filled}/{BRIEF_FIELDS.length} filled
+          </span>
+          {!isReady && <span style={{ fontSize: 11, color: "#FF8800" }}>Fill Product + Problem to unlock stages</span>}
+        </div>
+        <div style={{ fontSize: 11, color: "#ccc", fontFamily: "monospace" }}>
+          {saving ? "saving..." : lastSaved ? "auto-saved" : "edits save on blur"}
+        </div>
+      </div>
+
+      {/* Fields — auto-save on blur */}
+      <div style={{ padding: "14px 18px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {BRIEF_FIELDS.map(f => {
+          const fieldStyle = {
+            width: "100%", padding: "8px 11px", borderRadius: 8,
+            border: "1.5px solid " + (brief[f.key]?.trim() ? "#0066FF33" : "#eee"),
+            fontSize: 13, fontFamily: "inherit", color: "#1a1a2a",
+            outline: "none", boxSizing: "border-box",
+            background: "#fafafa", transition: "border-color 0.15s",
+            resize: f.wide ? "none" : undefined,
+          };
+          return (
+            <div key={f.key} style={{ gridColumn: f.wide ? "1 / -1" : "auto" }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 4, marginBottom: 5 }}>
+                {f.label}
+                {f.required && <span style={{ color: "#FF4444", fontSize: 10 }}>*</span>}
+              </label>
+              {f.wide ? (
+                <textarea
+                  defaultValue={brief[f.key] || ""}
+                  key={f.key + value}
+                  placeholder={f.placeholder}
+                  rows={2}
+                  style={fieldStyle}
+                  onFocus={e => e.target.style.borderColor = "#0066FF"}
+                  onBlur={e => { e.target.style.borderColor = e.target.value.trim() ? "#0066FF33" : "#eee"; saveField(f.key, e.target.value); }}
+                />
+              ) : (
+                <input
+                  defaultValue={brief[f.key] || ""}
+                  key={f.key + value}
+                  placeholder={f.placeholder}
+                  style={fieldStyle}
+                  onFocus={e => e.target.style.borderColor = "#0066FF"}
+                  onBlur={e => { e.target.style.borderColor = e.target.value.trim() ? "#0066FF33" : "#eee"; saveField(f.key, e.target.value); }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Feature description input ──────────────────────────────────────────────────
+
+function FeatureDescriptionInput({ value, onSave }) {
+  const [focused,   setFocused]   = useState(false);
+  const [saving,    setSaving]    = useState(false);
+  const [lastSaved, setLastSaved] = useState(null);
+
+  const handleBlur = async (e) => {
+    setFocused(false);
+    if (!e.target.value.trim()) return;
+    setSaving(true);
+    await onSave(e.target.value.trim());
+    setSaving(false);
+    setLastSaved(new Date());
+  };
+
+  return (
+    <div style={{ marginBottom: 18, background: "#fff", border: "1.5px solid " + (focused ? "#00AA44" : "#00AA4422"), borderRadius: 12, overflow: "hidden", boxShadow: focused ? "0 0 0 3px #00AA4412" : "none", transition: "all 0.15s" }}>
+      <div style={{ padding: "10px 14px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#555", textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 6 }}>
+          Feature Context
+          <span style={{ color: "#FF4444", fontSize: 10 }}>*</span>
+        </div>
+        <div style={{ fontSize: 11, color: "#ccc", fontFamily: "monospace" }}>
+          {saving ? "saving..." : lastSaved ? "auto-saved" : "saves on blur"}
+        </div>
+      </div>
+      <textarea
+        defaultValue={value || ""}
+        key={value}
+        onFocus={() => setFocused(true)}
+        onBlur={handleBlur}
+        placeholder="What is this feature? Who uses it, what's in scope, what's explicitly out of scope, any technical constraints."
+        rows={3}
+        style={{ width: "100%", padding: "10px 14px", fontSize: 13, fontFamily: "inherit", color: "#1a1a2a", lineHeight: 1.7, border: "none", outline: "none", resize: "none", boxSizing: "border-box", background: "transparent" }}
       />
-      <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
-        <button onClick={save} style={{ padding: "5px 14px", background: color, border: "none", borderRadius: 6, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Save</button>
-        <button onClick={() => { setDraft(value || ""); setEditing(false); }} style={{ padding: "5px 12px", background: "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 6, color: "#888", fontSize: 12, cursor: "pointer" }}>Cancel</button>
+      <div style={{ padding: "6px 14px", borderTop: "1px solid #f0f0f0" }}>
+        <span style={{ fontSize: 11, color: "#ccc" }}>Used by all feature stages · Cmd+Enter to save</span>
       </div>
     </div>
   );
@@ -573,7 +682,7 @@ export default function PMPipeline({ ps }) {
     );
   }
 
-  const projectDescriptionMissing = !activeProject.description?.trim();
+  const projectDescriptionMissing = !activeProject.description?.trim() || activeProject.description.trim().length < 20;
   const featureDescriptionMissing = activeFeature && !activeFeature.description?.trim();
   const projectStageCount         = Object.keys(projectOutputs).length;
   const featureStageCount         = activeFeature ? Object.keys(currentFeatureOutputs).length : 0;
@@ -591,10 +700,9 @@ export default function PMPipeline({ ps }) {
           count={projectStageCount}
         />
 
-        <DescriptionInput
+        <ProjectBrief
           value={activeProject.description}
-          placeholder="Describe your product — what it is, who it's for, what problem it solves. Required before running any stage."
-          color="#0066FF"
+          projectId={activeProject.id}
           onSave={(desc) => updateProject(activeProject.id, activeProject.name, desc)}
         />
 
@@ -632,10 +740,13 @@ export default function PMPipeline({ ps }) {
               count={featureStageCount}
             />
 
-            <DescriptionInput
+            <ContextInput
               value={activeFeature.description}
-              placeholder="Describe this feature — user problem, scope, non-goals. Required before running any stage."
               color="#00AA44"
+              label="Feature Context"
+              hint="Describe this feature — scope, user problem, non-goals, any relevant technical notes."
+              placeholder="What is this feature? Who uses it, what problem does it solve, what is explicitly out of scope? Add any technical constraints or design decisions already made."
+              minRows={3}
               onSave={(desc) => updateFeature(activeFeature.id, activeFeature.name, desc)}
             />
 
