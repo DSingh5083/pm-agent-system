@@ -177,97 +177,61 @@ function InterviewModal({ stage, interviewEndpoint, runEndpoint, onComplete, onC
 
 // ── Project Brief (structured fields, auto-save on blur) ─────────────────────
 
-const BRIEF_FIELDS = [
-  { key: "product",  label: "Product",        placeholder: "What is it? One sentence tagline.",               required: true,  wide: false },
-  { key: "audience", label: "Target Audience", placeholder: "Who is this for? Be specific.",                   required: false, wide: false },
-  { key: "problem",  label: "Problem",         placeholder: "What problem does it solve?",                     required: true,  wide: true  },
-  { key: "goal",     label: "Business Goal",   placeholder: "What does success look like? Revenue, users...", required: false, wide: true  },
-  { key: "stack",    label: "Tech Stack",      placeholder: "e.g. React, Node, Postgres, AWS",                required: false, wide: false },
-];
-
-function parseBrief(raw) {
-  if (!raw) return {};
-  try { const p = JSON.parse(raw); if (p && typeof p === "object") return p; } catch {}
-  return { product: raw };
-}
+// ── Project Brief (free text, always editable, auto-saves on blur) ────────────
 
 function ProjectBrief({ value, onSave }) {
-  const [brief, setBrief] = useState(() => parseBrief(value));
-  const [saving, setSaving] = useState(false);
+  const [draft,     setDraft]     = useState(value || "");
+  const [saving,    setSaving]    = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
+  const timerRef                  = useRef(null);
 
-  useEffect(() => { setBrief(parseBrief(value)); }, [value]);
+  // Sync when project changes
+  useEffect(() => { setDraft(value || ""); }, [value]);
 
-  const saveField = async (key, val) => {
-    const updated = { ...brief, [key]: val };
-    setBrief(updated);
+  // Auto-save 800ms after user stops typing
+  const handleChange = (e) => {
+    const val = e.target.value;
+    setDraft(val);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async () => {
+      setSaving(true);
+      await onSave(val);
+      setSaving(false);
+      setLastSaved(new Date());
+    }, 800);
+  };
+
+  // Also save immediately on blur
+  const handleBlur = async (e) => {
+    clearTimeout(timerRef.current);
+    if (e.target.value === (value || "")) return; // no change
     setSaving(true);
-    await onSave(JSON.stringify(updated));
+    await onSave(e.target.value);
     setSaving(false);
     setLastSaved(new Date());
   };
 
-  const filled   = BRIEF_FIELDS.filter(f => brief[f.key]?.trim()).length;
-  const isReady  = BRIEF_FIELDS.filter(f => f.required).every(f => brief[f.key]?.trim());
+  const isReady = draft.trim().length > 0;
 
   return (
-    <div style={{ marginBottom: 20, background: "#fff", border: "1.5px solid #0066FF22", borderRadius: 14, overflow: "hidden", boxShadow: "0 1px 6px rgba(0,102,255,0.05)" }}>
-
-      {/* Header */}
-      <div style={{ padding: "11px 18px", background: "#0066FF06", borderBottom: "1px solid #0066FF10", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a" }}>Project Brief</div>
-          <span style={{ fontSize: 10, fontFamily: "monospace", color: isReady ? "#00AA44" : "#FF8800", background: isReady ? "#00AA4412" : "#FF880012", padding: "1px 7px", borderRadius: 10 }}>
-            {filled}/{BRIEF_FIELDS.length} filled
-          </span>
-          {!isReady && <span style={{ fontSize: 11, color: "#FF8800" }}>Fill Product + Problem to unlock stages</span>}
+    <div style={{ marginBottom: 20, background: "#fff", border: "1.5px solid #0066FF22", borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,102,255,0.05)" }}>
+      <div style={{ padding: "10px 16px", background: "#0066FF06", borderBottom: "1px solid #0066FF10", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1a2a", display: "flex", alignItems: "center", gap: 8 }}>
+          Project Brief
+          {!isReady && <span style={{ fontSize: 11, color: "#FF8800", fontWeight: 400 }}>Required to unlock stages</span>}
         </div>
-        <div style={{ fontSize: 11, color: "#ccc", fontFamily: "monospace" }}>
-          {saving ? "saving..." : lastSaved ? "auto-saved" : "edits save on blur"}
+        <div style={{ fontSize: 11, color: "#bbb", fontFamily: "monospace" }}>
+          {saving ? "saving..." : lastSaved ? "auto-saved ✓" : "auto-saves as you type"}
         </div>
       </div>
-
-      {/* Fields — auto-save on blur */}
-      <div style={{ padding: "14px 18px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        {BRIEF_FIELDS.map(f => {
-          const fieldStyle = {
-            width: "100%", padding: "8px 11px", borderRadius: 8,
-            border: "1.5px solid " + (brief[f.key]?.trim() ? "#0066FF33" : "#eee"),
-            fontSize: 13, fontFamily: "inherit", color: "#1a1a2a",
-            outline: "none", boxSizing: "border-box",
-            background: "#fafafa", transition: "border-color 0.15s",
-            resize: f.wide ? "none" : undefined,
-          };
-          return (
-            <div key={f.key} style={{ gridColumn: f.wide ? "1 / -1" : "auto" }}>
-              <label style={{ fontSize: 11, fontWeight: 700, color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 4, marginBottom: 5 }}>
-                {f.label}
-                {f.required && <span style={{ color: "#FF4444", fontSize: 10 }}>*</span>}
-              </label>
-              {f.wide ? (
-                <textarea
-                  defaultValue={brief[f.key] || ""}
-                  key={f.key + value}
-                  placeholder={f.placeholder}
-                  rows={2}
-                  style={fieldStyle}
-                  onFocus={e => e.target.style.borderColor = "#0066FF"}
-                  onBlur={e => { e.target.style.borderColor = e.target.value.trim() ? "#0066FF33" : "#eee"; saveField(f.key, e.target.value); }}
-                />
-              ) : (
-                <input
-                  defaultValue={brief[f.key] || ""}
-                  key={f.key + value}
-                  placeholder={f.placeholder}
-                  style={fieldStyle}
-                  onFocus={e => e.target.style.borderColor = "#0066FF"}
-                  onBlur={e => { e.target.style.borderColor = e.target.value.trim() ? "#0066FF33" : "#eee"; saveField(f.key, e.target.value); }}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
+      <textarea
+        value={draft}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        placeholder="Describe your product — what it is, who it's for, what problem it solves, business goal, tech stack. This context is used by every stage and feature."
+        rows={4}
+        style={{ width: "100%", padding: "14px 16px", fontSize: 13, fontFamily: "inherit", color: "#1a1a2a", lineHeight: 1.8, border: "none", outline: "none", resize: "vertical", boxSizing: "border-box", background: "#fff" }}
+      />
     </div>
   );
 }
