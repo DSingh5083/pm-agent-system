@@ -960,6 +960,33 @@ app.post("/features/:id/code-stories/save", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── WRITING ENHANCER (Gemini) ─────────────────────────────────────────────────
+
+app.post("/enhance-gemini", async (req, res) => {
+  try {
+    const { prompt, maxTokens = 3000 } = req.body;
+    if (!prompt?.trim()) return res.status(400).json({ error: "Prompt required" });
+
+    if (!geminiClient) {
+      return res.status(503).json({ error: "GEMINI_API_KEY not configured on server." });
+    }
+
+    const model  = geminiClient.getGenerativeModel(
+      { model: "gemini-2.0-flash" },
+      { apiVersion: "v1beta" }
+    );
+
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: maxTokens },
+    });
+
+    res.json({ result: result.response.text() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── WRITING ENHANCER ──────────────────────────────────────────────────────────
 
 app.post("/enhance", async (req, res) => {

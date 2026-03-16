@@ -4,6 +4,7 @@
 
 import { useState } from "react";
 import { callClaude } from "../../lib/claude.js";
+const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
 import { SectionLabel, EmptyState, CopyButton, PillToggle } from "../../components/ui.jsx";
 
 // ── Enhance Writing Config ────────────────────────────────────────────────────
@@ -98,8 +99,7 @@ function EnhanceWriting() {
     const selectedTone = TONES.find(t => t.id === tone);
     const selectedType = TYPES.find(t => t.id === writingType);
     try {
-      const result = await callClaude(
-        `You are an expert business writer. Enhance the following ${selectedType.label.toLowerCase()} to be more ${selectedTone.label.toLowerCase()}.
+      const geminiPrompt = `You are an expert business writer. Enhance the following ${selectedType.label.toLowerCase()} to be more ${selectedTone.label.toLowerCase()}.
 
 ORIGINAL TEXT:
 ${inputText}
@@ -119,8 +119,16 @@ VARIATION 2: [Short label]
 ---
 
 VARIATION 3: [Short label]
-[text]`, 3000
-      );
+[text]`;
+
+      const geminiRes = await fetch(API + "/enhance-gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: geminiPrompt, maxTokens: 3000 }),
+      });
+      const geminiData = await geminiRes.json();
+      if (geminiData.error) throw new Error(geminiData.error);
+      const result = geminiData.result;
       const parts = result.split("---").map(p => p.trim()).filter(Boolean);
       const parsed = parts.map(part => {
         const nl = part.indexOf("\n");
@@ -315,8 +323,7 @@ function StakeholderTranslator() {
     setLoadingIds(prev => [...prev, stakeholder.id]);
     setError(null);
     try {
-      const result = await callClaude(
-        `You are a product manager communicating a feature to a specific stakeholder.
+      const stakeholderPrompt = `You are a product manager communicating a feature to a specific stakeholder.
 
 FEATURE / CONTEXT:
 ${featureContext}
@@ -327,9 +334,16 @@ FORMAT: ${stakeholder.format}
 
 Write a clear, targeted message for this stakeholder. Focus only on what matters to them.
 Do not include a subject line or greeting — just the message body.
-Keep it concise and specific to their perspective.`, 1500
-      );
-      setResults(prev => ({ ...prev, [stakeholder.id]: result }));
+Keep it concise and specific to their perspective.`;
+
+      const sRes  = await fetch(API + "/enhance-gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: stakeholderPrompt, maxTokens: 1500 }),
+      });
+      const sData = await sRes.json();
+      if (sData.error) throw new Error(sData.error);
+      setResults(prev => ({ ...prev, [stakeholder.id]: sData.result }));
     } catch (e) {
       setError(e.message);
     } finally {
