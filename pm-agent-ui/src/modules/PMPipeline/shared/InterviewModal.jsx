@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API } from "./constants.js";
+import { API } from "../constants.js";
 
 export default function InterviewModal({ stage, interviewEndpoint, runEndpoint, onComplete, onCancel }) {
   const [phase, setPhase]       = useState("loading"); // loading | questions | running | distilling
