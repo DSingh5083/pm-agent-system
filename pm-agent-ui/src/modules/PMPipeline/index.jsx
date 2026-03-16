@@ -177,14 +177,250 @@ function InterviewModal({ stage, interviewEndpoint, runEndpoint, onComplete, onC
 
 // ── Project Brief (structured fields, auto-save on blur) ─────────────────────
 
-// ── Project Brief (free text + AI improve) ───────────────────────────────────
+// ── Bucket config ─────────────────────────────────────────────────────────────
+
+const BUCKETS = [
+  { key: "pain",  label: "User Pain",            icon: "😤", color: "#FF4444", bg: "#FFF5F5", border: "#FFCCCC", desc: "What is the actual problem?" },
+  { key: "feature", label: "Feature Idea",       icon: "💡", color: "#FF8800", bg: "#FFF8F0", border: "#FFDDAA", desc: "What is the proposed solution?" },
+  { key: "constraint", label: "Tech Constraint", icon: "⚙️", color: "#0066FF", bg: "#F0F7FF", border: "#BBDDFF", desc: "No-gos or dependencies" },
+  { key: "vibe",  label: "Vibe / Goal",           icon: "🎯", color: "#00AA44", bg: "#F0FFF6", border: "#AAEEBB", desc: "Emotional or strategic north star" },
+];
+
+// ── Semantic Sort Modal ────────────────────────────────────────────────────────
+
+function SemanticSortModal({ onClose, onApprove }) {
+  // step: "input" | "sorting" | "review" | "generating"
+  const [step,         setStep]         = useState("input");
+  const [rawInput,     setRawInput]     = useState("");
+  const [buckets,      setBuckets]      = useState({ pain: [], feature: [], constraint: [], vibe: [] });
+  const [enhancements, setEnhancements] = useState([]);
+  const [searchStatus, setSearchStatus] = useState(""); // background search label
+  const [generating,   setGenerating]   = useState(false);
+
+  // Step 1 → Sort
+  const handleSort = async () => {
+    if (!rawInput.trim()) return;
+    setStep("sorting");
+    try {
+      const res = await fetch(API + "/semantic-sort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: rawInput }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setBuckets(data.buckets);
+      setStep("review");
+      // Kick off background search silently
+      runBackgroundSearch(data.buckets);
+    } catch (e) {
+      alert("Sort failed: " + e.message);
+      setStep("input");
+    }
+  };
+
+  // Background search — fires while user reviews buckets
+  const runBackgroundSearch = async (b) => {
+    const painText = (b.pain || []).join(". ");
+    if (!painText) return;
+    setSearchStatus("Researching enhancements...");
+    try {
+      const res = await fetch(API + "/brief-enhancements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ buckets: b }),
+      });
+      const data = await res.json();
+      if (!data.error) setEnhancements(data.enhancements || []);
+    } catch {}
+    finally { setSearchStatus(""); }
+  };
+
+  // Move item between buckets
+  const moveItem = (fromKey, toKey, item) => {
+    setBuckets(prev => ({
+      ...prev,
+      [fromKey]: prev[fromKey].filter(i => i !== item),
+      [toKey]:   [...(prev[toKey] || []), item],
+    }));
+  };
+
+  // Remove item
+  const removeItem = (bucketKey, item) => {
+    setBuckets(prev => ({ ...prev, [bucketKey]: prev[bucketKey].filter(i => i !== item) }));
+  };
+
+  // Step 3 → Generate brief
+  const handleApprove = async () => {
+    setGenerating(true);
+    setStep("generating");
+    try {
+      const res = await fetch(API + "/generate-brief-from-sort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ buckets, enhancements }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      onApprove(data.brief);
+    } catch (e) {
+      alert("Brief generation failed: " + e.message);
+      setStep("review");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 860, maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.25)" }}>
+
+        {/* Modal header */}
+        <div style={{ padding: "18px 24px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1a2a" }}>🧠 Semantic Sort</div>
+            <div style={{ fontSize: 12, color: "#aaa", marginTop: 2 }}>
+              {step === "input"      && "Paste your raw notes — the agent will categorise and research them"}
+              {step === "sorting"    && "Categorising your input..."}
+              {step === "review"     && "Review the buckets, then approve to generate your brief"}
+              {step === "generating" && "Writing your structured brief..."}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, color: "#ccc", cursor: "pointer", padding: "0 4px" }}>✕</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+
+          {/* ── Step 1: Input ── */}
+          {step === "input" && (
+            <div>
+              <textarea
+                autoFocus
+                value={rawInput}
+                onChange={e => setRawInput(e.target.value)}
+                placeholder={"Dump your raw notes here. Don't worry about structure — just write.\n\nExamples:\n• Users hate uploading CSVs every time they want a report\n• We need to integrate with Salesforce\n• No mobile app — web only\n• I want this to feel like magic, not a spreadsheet\n• Auto-sync data from CRM in real time"}
+                rows={10}
+                style={{ width: "100%", padding: "14px 16px", fontSize: 13, fontFamily: "inherit", color: "#1a1a2a", lineHeight: 1.8, border: "1.5px solid #e0e0e0", borderRadius: 10, outline: "none", resize: "none", boxSizing: "border-box" }}
+              />
+              <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
+                <button onClick={handleSort} disabled={!rawInput.trim()}
+                  style={{ padding: "9px 24px", background: !rawInput.trim() ? "#e0e0e0" : "linear-gradient(135deg, #7B2FFF, #0066FF)", border: "none", borderRadius: 9, color: !rawInput.trim() ? "#aaa" : "#fff", fontSize: 13, fontWeight: 700, cursor: !rawInput.trim() ? "not-allowed" : "pointer" }}>
+                  Sort My Notes →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 2: Sorting spinner ── */}
+          {step === "sorting" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 0", gap: 14 }}>
+              <div style={{ fontSize: 36, animation: "spin 1.5s linear infinite", display: "inline-block" }}>🧠</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1a2a" }}>Categorising your notes...</div>
+              <div style={{ fontSize: 12, color: "#aaa" }}>Sorting into Pain, Feature, Constraint, and Vibe buckets</div>
+            </div>
+          )}
+
+          {/* ── Step 3: Review ── */}
+          {step === "review" && (
+            <div>
+              {/* Buckets grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+                {BUCKETS.map(b => (
+                  <div key={b.key} style={{ background: b.bg, border: "1.5px solid " + b.border, borderRadius: 12, overflow: "hidden" }}>
+                    <div style={{ padding: "10px 14px", borderBottom: "1px solid " + b.border, display: "flex", alignItems: "center", gap: 7 }}>
+                      <span style={{ fontSize: 16 }}>{b.icon}</span>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: b.color }}>{b.label}</div>
+                        <div style={{ fontSize: 10, color: "#aaa" }}>{b.desc}</div>
+                      </div>
+                      <span style={{ marginLeft: "auto", fontSize: 10, fontFamily: "monospace", color: b.color, background: "white", padding: "1px 6px", borderRadius: 8 }}>
+                        {(buckets[b.key] || []).length}
+                      </span>
+                    </div>
+                    <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, minHeight: 60 }}>
+                      {(buckets[b.key] || []).length === 0 && (
+                        <div style={{ fontSize: 11, color: "#ccc", fontStyle: "italic" }}>Nothing here</div>
+                      )}
+                      {(buckets[b.key] || []).map((item, i) => (
+                        <div key={i} style={{ background: "#fff", border: "1px solid " + b.border, borderRadius: 7, padding: "7px 10px", fontSize: 12, color: "#333", lineHeight: 1.5, display: "flex", alignItems: "flex-start", gap: 8 }}>
+                          <span style={{ flex: 1 }}>{item}</span>
+                          <div style={{ display: "flex", gap: 4, flexShrink: 0, marginTop: 1 }}>
+                            {/* Move to other buckets */}
+                            {BUCKETS.filter(ob => ob.key !== b.key).map(ob => (
+                              <button key={ob.key} onClick={() => moveItem(b.key, ob.key, item)}
+                                title={"Move to " + ob.label}
+                                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, padding: "0 1px", opacity: 0.5, lineHeight: 1 }}>
+                                {ob.icon}
+                              </button>
+                            ))}
+                            <button onClick={() => removeItem(b.key, item)}
+                              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#FF4444", padding: "0 1px", opacity: 0.6 }}>✕</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Suggested Enhancements */}
+              {(enhancements.length > 0 || searchStatus) && (
+                <div style={{ background: "#F5F0FF", border: "1.5px solid #C4A8FF", borderRadius: 12, padding: "14px 16px", marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#7B2FFF", marginBottom: 10, display: "flex", alignItems: "center", gap: 7 }}>
+                    ✦ Suggested Enhancements
+                    {searchStatus && <span style={{ fontSize: 10, color: "#aaa", fontWeight: 400, animation: "pulse 1.5s ease-in-out infinite" }}>{searchStatus}</span>}
+                  </div>
+                  {enhancements.map((e, i) => (
+                    <div key={i} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: i < enhancements.length - 1 ? "1px solid #DDD0FF" : "none" }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#1a1a2a", marginBottom: 3 }}>{e.title}</div>
+                      <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>{e.description}</div>
+                      {e.examples && <div style={{ fontSize: 11, color: "#7B2FFF", marginTop: 4 }}>e.g. {e.examples}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Approve */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button onClick={onClose}
+                  style={{ padding: "8px 16px", background: "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 8, color: "#666", fontSize: 13, cursor: "pointer" }}>
+                  Cancel
+                </button>
+                <button onClick={handleApprove}
+                  style={{ padding: "8px 24px", background: "linear-gradient(135deg, #00AA44, #0066FF)", border: "none", borderRadius: 8, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                  ✓ Approve & Generate Brief →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 4: Generating ── */}
+          {step === "generating" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 0", gap: 14 }}>
+              <div style={{ fontSize: 36, animation: "spin 1.5s linear infinite", display: "inline-block" }}>📝</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1a2a" }}>Writing your structured brief...</div>
+              <div style={{ fontSize: 12, color: "#aaa" }}>Synthesising Pain → Why, Features → What, Constraints + Research → How</div>
+            </div>
+          )}
+        </div>
+      </div>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+      `}</style>
+    </div>
+  );
+}
+
+// ── Project Brief (free text + Semantic Sort + Improve) ───────────────────────
 
 function ProjectBrief({ value, onSave }) {
   const [draft,     setDraft]     = useState(value || "");
   const [saving,    setSaving]    = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
   const [improving, setImproving] = useState(false);
-  const [preview,   setPreview]   = useState(null); // { original, improved }
+  const [preview,   setPreview]   = useState(null);
+  const [showSort,  setShowSort]  = useState(false);
   const timerRef                  = useRef(null);
 
   useEffect(() => { setDraft(value || ""); }, [value]);
@@ -239,89 +475,84 @@ function ProjectBrief({ value, onSave }) {
     setLastSaved(new Date());
   };
 
+  const handleSortApprove = async (brief) => {
+    setShowSort(false);
+    setDraft(brief);
+    setSaving(true);
+    await onSave(brief);
+    setSaving(false);
+    setLastSaved(new Date());
+  };
+
   const isReady = draft.trim().length > 0;
+  const btnBase = { padding: "4px 12px", borderRadius: 7, fontSize: 12, fontWeight: 600, border: "none", display: "flex", alignItems: "center", gap: 5, cursor: "pointer", transition: "all 0.15s" };
 
   return (
-    <div style={{ marginBottom: 20, background: "#fff", border: "1.5px solid #0066FF22", borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,102,255,0.05)" }}>
+    <>
+      {showSort && <SemanticSortModal onClose={() => setShowSort(false)} onApprove={handleSortApprove} />}
 
-      {/* Header */}
-      <div style={{ padding: "10px 16px", background: "#0066FF06", borderBottom: "1px solid #0066FF10", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1a2a", display: "flex", alignItems: "center", gap: 8 }}>
-          Project Brief
-          {!isReady && <span style={{ fontSize: 11, color: "#FF8800", fontWeight: 400 }}>Required to unlock stages</span>}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ fontSize: 11, color: "#bbb", fontFamily: "monospace" }}>
-            {saving ? "saving..." : lastSaved ? "auto-saved ✓" : "auto-saves as you type"}
+      <div style={{ marginBottom: 20, background: "#fff", border: "1.5px solid #0066FF22", borderRadius: 12, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,102,255,0.05)" }}>
+
+        {/* Header */}
+        <div style={{ padding: "10px 16px", background: "#0066FF06", borderBottom: "1px solid #0066FF10", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1a2a", display: "flex", alignItems: "center", gap: 8 }}>
+            Project Brief
+            {!isReady && <span style={{ fontSize: 11, color: "#FF8800", fontWeight: 400 }}>Required to unlock stages</span>}
           </div>
-          <button
-            onClick={handleImprove}
-            disabled={!draft.trim() || improving}
-            style={{
-              padding: "4px 12px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: !draft.trim() || improving ? "not-allowed" : "pointer",
-              background: !draft.trim() || improving ? "#f0f0f0" : "linear-gradient(135deg, #7B2FFF, #0066FF)",
-              border: "none", color: !draft.trim() || improving ? "#bbb" : "#fff",
-              display: "flex", alignItems: "center", gap: 5, transition: "all 0.15s",
-            }}>
-            {improving ? (
-              <><span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>✦</span> Improving...</>
-            ) : (
-              <>✦ Improve with AI</>
-            )}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ fontSize: 11, color: "#bbb", fontFamily: "monospace" }}>
+              {saving ? "saving..." : lastSaved ? "auto-saved ✓" : "auto-saves as you type"}
+            </div>
+            {/* Semantic Sort button */}
+            <button onClick={() => setShowSort(true)}
+              style={{ ...btnBase, background: "linear-gradient(135deg, #7B2FFF22, #0066FF11)", color: "#7B2FFF", border: "1px solid #7B2FFF33" }}>
+              🧠 Semantic Sort
+            </button>
+            {/* Improve button */}
+            <button onClick={handleImprove} disabled={!draft.trim() || improving}
+              style={{ ...btnBase, background: !draft.trim() || improving ? "#f0f0f0" : "linear-gradient(135deg, #7B2FFF, #0066FF)", color: !draft.trim() || improving ? "#bbb" : "#fff" }}>
+              {improving
+                ? <><span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>✦</span> Improving...</>
+                : <>✦ Improve with AI</>}
+            </button>
+          </div>
         </div>
+
+        {/* Textarea */}
+        {!preview && (
+          <textarea
+            value={draft}
+            onChange={handleChange}
+            onBlur={handleBlur}
+            placeholder="Describe your product — what it is, who it's for, what problem it solves, business goal, tech stack. Or click 'Semantic Sort' to paste raw notes and let the agent structure them."
+            rows={4}
+            style={{ width: "100%", padding: "14px 16px", fontSize: 13, fontFamily: "inherit", color: "#1a1a2a", lineHeight: 1.8, border: "none", outline: "none", resize: "vertical", boxSizing: "border-box", background: "#fff" }}
+          />
+        )}
+
+        {/* Improve preview */}
+        {preview && (
+          <div style={{ padding: "14px 16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Original</div>
+                <div style={{ padding: "12px 14px", background: "#fff5f5", border: "1px solid #FFB3B3", borderRadius: 8, fontSize: 12, color: "#888", lineHeight: 1.8, whiteSpace: "pre-wrap", minHeight: 80 }}>{preview.original}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#0066FF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>✦ AI Improved</div>
+                <div style={{ padding: "12px 14px", background: "#f0f7ff", border: "1px solid #0066FF33", borderRadius: 8, fontSize: 12, color: "#1a1a2a", lineHeight: 1.8, whiteSpace: "pre-wrap", minHeight: 80 }}>{preview.improved}</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={acceptImproved} style={{ padding: "7px 18px", background: "#0066FF", border: "none", borderRadius: 8, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>✓ Use Improved Version</button>
+              <button onClick={() => setPreview(null)} style={{ padding: "7px 14px", background: "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 8, color: "#666", fontSize: 13, cursor: "pointer" }}>Keep Original</button>
+            </div>
+          </div>
+        )}
+
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       </div>
-
-      {/* Textarea — hidden when preview is showing */}
-      {!preview && (
-        <textarea
-          value={draft}
-          onChange={handleChange}
-          onBlur={handleBlur}
-          placeholder="Describe your product — what it is, who it's for, what problem it solves, business goal, tech stack. This context is used by every stage and feature."
-          rows={4}
-          style={{ width: "100%", padding: "14px 16px", fontSize: 13, fontFamily: "inherit", color: "#1a1a2a", lineHeight: 1.8, border: "none", outline: "none", resize: "vertical", boxSizing: "border-box", background: "#fff" }}
-        />
-      )}
-
-      {/* Before / After preview */}
-      {preview && (
-        <div style={{ padding: "14px 16px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-
-            {/* Original */}
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#aaa", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Original</div>
-              <div style={{ padding: "12px 14px", background: "#fff5f5", border: "1px solid #FFB3B3", borderRadius: 8, fontSize: 12, color: "#888", lineHeight: 1.8, whiteSpace: "pre-wrap", minHeight: 80 }}>
-                {preview.original}
-              </div>
-            </div>
-
-            {/* Improved */}
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#0066FF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>✦ AI Improved</div>
-              <div style={{ padding: "12px 14px", background: "#f0f7ff", border: "1px solid #0066FF33", borderRadius: 8, fontSize: 12, color: "#1a1a2a", lineHeight: 1.8, whiteSpace: "pre-wrap", minHeight: 80 }}>
-                {preview.improved}
-              </div>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={acceptImproved}
-              style={{ padding: "7px 18px", background: "#0066FF", border: "none", borderRadius: 8, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-              ✓ Use Improved Version
-            </button>
-            <button onClick={() => setPreview(null)}
-              style={{ padding: "7px 14px", background: "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 8, color: "#666", fontSize: 13, cursor: "pointer" }}>
-              Keep Original
-            </button>
-          </div>
-        </div>
-      )}
-
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-    </div>
+    </>
   );
 }
 
@@ -717,14 +948,113 @@ function SectionHeader({ icon, title, subtitle, color, count }) {
   );
 }
 
+
+// ── Discovery Interview Modal ─────────────────────────────────────────────────
+
+function DiscoveryInterviewModal({ project, onClose, onComplete }) {
+  const [questions,  setQuestions]  = useState(null);
+  const [answers,    setAnswers]    = useState({});
+  const [loading,    setLoading]    = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    fetch(API + "/projects/" + project.id + "/discovery-interview", { method: "POST" })
+      .then(r => r.json())
+      .then(d => { setQuestions(d.questions || []); setLoading(false); })
+      .catch(() => { setLoading(false); onClose(); });
+  }, [project.id]);
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    // Build answers into a brief and save to project description
+    const answersText = questions.map((q, i) =>
+      `Q: ${q}\nA: ${answers[i] || "(skipped)"}`
+    ).join("\n\n");
+    const brief = `Discovery Interview Answers:\n\n${answersText}`;
+    await fetch(API + "/projects/" + project.id, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: project.name, description: brief }),
+    });
+    setSubmitting(false);
+    onComplete(brief);
+  };
+
+  const allAnswered = questions && questions.some((_, i) => answers[i]?.trim());
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,10,20,0.65)", backdropFilter: "blur(4px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 620, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)", overflow: "hidden" }}>
+
+        {/* Header */}
+        <div style={{ padding: "20px 24px 14px", borderBottom: "1px solid #f0f0f0", background: "linear-gradient(135deg, #1a1a2a, #0066FF22)" }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "#fff", marginBottom: 4 }}>🔍 Discovery Interview</div>
+          <div style={{ fontSize: 12, color: "#ffffff88" }}>
+            Before any stages run — {project.name}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 11, color: "#ffffff55", lineHeight: 1.6, fontStyle: "italic" }}>
+            "Do not write the brief immediately. Ask pointed, non-obvious questions to clarify the Why, User Pain, and Technical Constraints."
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
+          {loading && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#aaa", fontSize: 13 }}>
+              <span style={{ animation: "spin 1s linear infinite", display: "inline-block", fontSize: 16 }}>✦</span>
+              Generating discovery questions...
+            </div>
+          )}
+
+          {questions && questions.map((q, i) => (
+            <div key={i} style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a", marginBottom: 8, display: "flex", gap: 8 }}>
+                <span style={{ width: 22, height: 22, borderRadius: "50%", background: "#0066FF", color: "#fff", fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</span>
+                {q}
+              </div>
+              <textarea
+                value={answers[i] || ""}
+                onChange={e => setAnswers(prev => ({ ...prev, [i]: e.target.value }))}
+                placeholder="Your answer..."
+                rows={3}
+                style={{ width: "100%", padding: "10px 12px", fontSize: 13, fontFamily: "inherit", color: "#1a1a2a", lineHeight: 1.7, border: "1.5px solid #e0e0e0", borderRadius: 8, outline: "none", resize: "none", boxSizing: "border-box", transition: "border-color 0.15s" }}
+                onFocus={e => e.target.style.borderColor = "#0066FF"}
+                onBlur={e => e.target.style.borderColor = "#e0e0e0"}
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "14px 24px", borderTop: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fafafa" }}>
+          <button onClick={onClose} style={{ padding: "7px 16px", background: "none", border: "1px solid #e0e0e0", borderRadius: 8, color: "#888", fontSize: 13, cursor: "pointer" }}>
+            Skip for now
+          </button>
+          <button onClick={handleSubmit} disabled={!allAnswered || submitting || loading}
+            style={{ padding: "8px 24px", background: !allAnswered || submitting || loading ? "#e8e8e8" : "#0066FF", border: "none", borderRadius: 8, color: !allAnswered || submitting || loading ? "#aaa" : "#fff", fontSize: 13, fontWeight: 700, cursor: !allAnswered || submitting || loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            {submitting ? <><span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>✦</span> Saving...</> : "Save & Start Building →"}
+          </button>
+        </div>
+      </div>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export default function PMPipeline({ ps }) {
+export default function PMPipeline({ ps, discoveryProject: externalDiscovery, onDiscoveryDone }) {
   const { activeProject, activeFeature, projectOutputs, featureOutputs, constraints,
           saveProjectOutput, saveFeatureOutput, updateProject, updateFeature,
           addConstraint, updateConstraint, deleteConstraint } = ps;
 
   const currentFeatureOutputs = activeFeature ? (featureOutputs[activeFeature.id] || {}) : {};
+  const [discoveryProject, setDiscoveryProject] = useState(null);
+
+  // Trigger modal when a new project is created from sidebar
+  useEffect(() => {
+    if (externalDiscovery) setDiscoveryProject(externalDiscovery);
+  }, [externalDiscovery?.id]);
 
   if (!activeProject) {
     return (
@@ -742,6 +1072,17 @@ export default function PMPipeline({ ps }) {
 
   return (
     <div style={{ display: "flex", height: "calc(100vh - 48px)", overflow: "hidden", background: "#f5f6f8" }}>
+      {discoveryProject && (
+        <DiscoveryInterviewModal
+          project={discoveryProject}
+          onClose={() => { setDiscoveryProject(null); if (onDiscoveryDone) onDiscoveryDone(); }}
+          onComplete={(brief) => {
+            setDiscoveryProject(null);
+            if (onDiscoveryDone) onDiscoveryDone();
+            updateProject(discoveryProject.id, discoveryProject.name, brief);
+          }}
+        />
+      )}
       <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px" }}>
 
         {/* PROJECT STRATEGY */}

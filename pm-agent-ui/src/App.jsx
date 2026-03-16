@@ -24,7 +24,7 @@ function timeAgo(d) {
   return `${Math.floor(s/86400)}d ago`;
 }
 
-function Sidebar({ ps }) {
+function Sidebar({ ps, onNewProject }) {
   const { projects, activeProject, features, activeFeature, loading,
           loadProject, createProject, deleteProject,
           createFeature, deleteFeature, setActiveFeature } = ps;
@@ -38,8 +38,9 @@ function Sidebar({ ps }) {
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
-    await createProject(newProjectName.trim());
+    const project = await createProject(newProjectName.trim());
     setNewProjectName(""); setCreatingProject(false);
+    if (onNewProject && project) onNewProject(project);
   };
 
   const handleCreateFeature = async () => {
@@ -182,12 +183,13 @@ function Sidebar({ ps }) {
 }
 
 export default function App() {
-  const [activeModule, setActiveModule] = useState("pipeline");
+  const [activeModule, setActiveModule]         = useState("pipeline");
+  const [discoveryProject, setDiscoveryProject] = useState(null);
   const ps = useProjects();
 
   return (
     <div style={{ display: "flex", height: "100vh", width: "100vw", overflow: "hidden", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      <Sidebar ps={ps} />
+      <Sidebar ps={ps} onNewProject={(p) => { setActiveModule("pipeline"); setDiscoveryProject(p); }} />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {/* Top nav */}
@@ -226,7 +228,7 @@ export default function App() {
 
         {/* Module */}
         <div style={{ flex: 1, overflow: "hidden" }}>
-          {activeModule === "pipeline" && <PMPipeline ps={ps} />}
+          {activeModule === "pipeline" && <PMPipeline ps={ps} discoveryProject={discoveryProject} onDiscoveryDone={() => setDiscoveryProject(null)} />}
           {activeModule === "chat"     && <PMChat     ps={ps} />}
           {activeModule === "writing"  && <WritingEnhancer />}
           {activeModule === "docs"      && <Docs ps={ps} />}

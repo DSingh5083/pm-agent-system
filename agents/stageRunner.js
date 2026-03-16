@@ -1,38 +1,98 @@
 // agents/stageRunner.js
 // Universal stage runner. Context is pre-built by server.js before this is called.
-// This just executes the prompt — all context enrichment happens upstream.
+//
+// Model routing:
+//   model: "gemini"  → Gemini 2.0 Flash + Google Search grounding
+//                      (competitor intel + market analysis — live web data)
+//   default          → Claude Sonnet (all other stages)
 
 import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
 import { getStage } from "../stageRegistry.js";
 dotenv.config();
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const claudeClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-export async function runStage(stageId, context) {
-  const stage = getStage(stageId);
-  if (!stage) throw new Error("Unknown stage: " + stageId);
+const geminiClient = process.env.GEMINI_API_KEY
+  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+  : null;
 
-  console.log("Running stage: " + stage.label);
+// ── Gemini runner — Google Search grounding for live competitor + market data ──
+async function runWithGemini(stage, prompt) {
+  if (!geminiClient) {
+    throw new Error(
+      "GEMINI_API_KEY is not set. Add it to your .env file and Render environment variables. " +
+      "Get a free key at https://aistudio.google.com"
+    );
+  }
 
-  const prompt = stage.prompt(context);
+  const model = geminiClient.getGenerativeModel(
+    { model: "gemini-2.0-flash" },
+    { apiVersion: "v1beta" }
+  );
 
-  const tools = stage.useWebSearch ? [{
+  const result = await model.generateContent({
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    tools: [{ googleSearch: {} }],
+    generationConfig: { maxOutputTokens: 6000 },
+  });
+
+  return result.response.text();
+}
+
+// ── Agent rules — shared persona injected into every stage ───────────────────
+const AGENT_RULES = `
+You are a Senior Product Architect Agent. Direct, analytical, and slightly skeptical.
+Your job is to make the product better, not just agree with the user.
+
+Rules:
+- Use the "Jobs to be Done" (JTBD) framework for all user stories: "When [situation], I want to [motivation], so I can [outcome]."
+- Every PRD and feature spec must begin with a "TL;DR" executive summary (2-3 sentences max).
+- Every feature output must end with a "## Friction Check" section listing exactly 3 risks:
+  one Technical Debt risk, one UX Friction risk, one Low Adoption risk.
+- Never invent market share percentages or statistics. If data is unavailable, write "Data Not Found."
+- All external claims must include a [Source URL] or be flagged as [Unverified].
+- Be specific. Use actual product names, user segments, and metrics from the project context.
+- Challenge vague goals. If something is unclear or risky, say so directly.
+`.trim();
+
+// ── Claude runner ─────────────────────────────────────────────────────────────
+async function runWithClaude(stage, prompt) {
+  const tools = stage.useWebSearch && !stage.model ? [{
     type: "web_search_20250305",
     name: "web_search",
   }] : undefined;
 
-  const response = await client.messages.create({
+  const response = await claudeClient.messages.create({
     model:      "claude-sonnet-4-20250514",
     max_tokens: 6000,
+    system:     AGENT_RULES,
     tools,
     messages:   [{ role: "user", content: prompt }],
   });
 
-  const text = response.content
+  return response.content
     .filter(b => b.type === "text")
     .map(b => b.text)
     .join("\n");
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+export async function runStage(stageId, context) {
+  const stage = getStage(stageId);
+  if (!stage) throw new Error("Unknown stage: " + stageId);
+
+  console.log(`Running stage: ${stage.label} [${stage.model || "claude"}]`);
+
+  const prompt = stage.prompt(context);
+
+  let text;
+  if (stage.model === "gemini") {
+    text = await runWithGemini(stage, prompt);
+  } else {
+    text = await runWithClaude(stage, prompt);
+  }
 
   if (stage.renderer === "tickets") {
     try {
@@ -43,6 +103,6 @@ export async function runStage(stageId, context) {
     }
   }
 
-  console.log("Stage complete: " + stage.label);
+  console.log(`Stage complete: ${stage.label}`);
   return text;
 }
