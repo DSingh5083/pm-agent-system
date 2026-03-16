@@ -324,8 +324,8 @@ Return only the improved brief text, no preamble, no labels, no markdown.`
 
 app.post("/semantic-sort", async (req, res) => {
   try {
-    const { notes } = req.body;
-    if (!notes?.trim()) return res.status(400).json({ error: "Notes required" });
+    const input = req.body.input || req.body.notes;
+if (!input?.trim()) return res.status(400).json({ error: "Notes required" });
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
