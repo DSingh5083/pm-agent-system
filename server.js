@@ -19,9 +19,7 @@ const ALLOWED_ORIGINS = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
-    // Allow any vercel.app subdomain + explicit allowlist
     if (ALLOWED_ORIGINS.includes(origin) || /\.vercel\.app$/.test(origin)) {
       return callback(null, true);
     }
@@ -42,9 +40,7 @@ function formatConstraints(constraints) {
   return `PROJECT CONSTRAINTS (must be respected in all feature work):\n${lines.join("\n")}`;
 }
 
-
-
-// ── Agent Rules — injected into every stage, chat, and interview ──────────────
+// ── Agent Rules ───────────────────────────────────────────────────────────────
 
 const AGENT_RULES = `
 ## Role
@@ -75,16 +71,12 @@ function serialise(val) {
 // Rough token estimator — 1 token ~ 4 chars
 function estimateTokens(str) { return Math.ceil((str || "").length / 4); }
 
-// Smart context builder with per-stage relevance filtering + token budget
-// Budget: 60k tokens for prior work (leaves room for prompt + 6k output)
 const META_KEYS = new Set(["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers"]);
 const STAGE_NEEDS = {
-  // Project stages — only need peer outputs for synthesis
   competitor:      [],
   market_analysis: ["competitor"],
   roadmap:         ["competitor", "market_analysis"],
   gtm:             ["competitor", "market_analysis", "roadmap"],
-  // Feature stages — what each stage actually reads
   prd:             ["competitor", "market_analysis"],
   architecture:    ["prd"],
   flow:            ["prd", "architecture"],
@@ -102,14 +94,9 @@ function buildContextBlock(ctx, stageId) {
   if (ctx.featureDescription) parts.push("FEATURE DESCRIPTION: " + ctx.featureDescription);
   if (ctx.constraints)        parts.push(ctx.constraints);
 
-  // Determine which prior outputs to include
-  const needed  = stageId ? (STAGE_NEEDS[stageId] || []) : [];
-  const allKeys = Object.keys(ctx).filter(k => !META_KEYS.has(k));
-  
-  // If stage has defined needs, only include those. Otherwise include all.
-  const relevantKeys = needed.length > 0
-    ? allKeys.filter(k => needed.includes(k))
-    : allKeys;
+  const needed      = stageId ? (STAGE_NEEDS[stageId] || []) : [];
+  const allKeys     = Object.keys(ctx).filter(k => !META_KEYS.has(k));
+  const relevantKeys = needed.length > 0 ? allKeys.filter(k => needed.includes(k)) : allKeys;
 
   if (relevantKeys.length > 0) {
     const TOKEN_BUDGET = 60000;
@@ -121,10 +108,7 @@ function buildContextBlock(ctx, stageId) {
       const raw     = serialise(ctx[k]);
       const tokens  = estimateTokens(raw);
       const allowed = TOKEN_BUDGET - usedTokens;
-
-      if (allowed <= 500) break; // no budget left
-
-      // If it fits, use in full. If not, truncate to budget.
+      if (allowed <= 500) break;
       const text = tokens <= allowed ? raw : raw.slice(0, allowed * 4) + "\n...[truncated for context window]";
       priorParts.push(`\n${label}:\n${text}`);
       usedTokens += estimateTokens(text);
@@ -142,7 +126,6 @@ function buildContextBlock(ctx, stageId) {
   return parts.join("\n");
 }
 
-// Build context object for a project stage — NO truncation
 async function buildProjectContext(projectId, project, stageId) {
   const [outputs, constraints] = await Promise.all([
     projectOutputsDb.getAll(projectId),
@@ -160,7 +143,6 @@ async function buildProjectContext(projectId, project, stageId) {
   return ctx;
 }
 
-// Build context object for a feature stage — NO truncation
 async function buildFeatureContext(featureId, feature, project, stageId) {
   const [featureOutputs, projectOutputs, constraints] = await Promise.all([
     featureOutputsDb.getAll(featureId),
@@ -185,8 +167,6 @@ async function buildFeatureContext(featureId, feature, project, stageId) {
   return ctx;
 }
 
-// ── Interview: generate 3-5 clarifying questions before a stage runs ─────────
-// Returns questions as a JSON array of strings.
 async function generateInterviewQuestions(stageId, ctx) {
   const stage = getStage(stageId);
   const contextBlock = buildContextBlock(ctx, stageId);
@@ -219,31 +199,24 @@ Example: ["What is the primary monetisation model?", "Who is the decision maker 
     const clean = text.replace(/```json|```/g, "").trim();
     return JSON.parse(clean);
   } catch {
-    // Fallback: extract anything that looks like a question
     const lines = text.split("\n").filter(l => l.includes("?")).map(l => l.replace(/^[-*\d.]\s*/, "").trim());
     return lines.length > 0 ? lines : ["What specific problem does this solve for the user?", "What does success look like in 3 months?"];
   }
 }
 
-// ── Distillation: synthesise prior outputs into a structured briefing ─────────
 async function distillContext(stageId, ctx) {
   const stage = getStage(stageId);
   const stageKeys = Object.keys(ctx).filter(k =>
     !["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers"].includes(k)
   );
 
-  // No prior work to distil
   if (stageKeys.length === 0) return null;
 
-  // Cap each prior output at 3000 tokens (12000 chars) for the distillation input
-  // Distillation output is short (~800 tokens) so it's safe to pass forward in full
-  const TOKEN_CAP_PER_STAGE = 12000; // chars (~3000 tokens)
+  const TOKEN_CAP_PER_STAGE = 12000;
   const priorWork = stageKeys.map(k => {
     const label = getStage(k)?.label || k;
     const raw   = serialise(ctx[k]);
-    const text  = raw.length > TOKEN_CAP_PER_STAGE
-      ? raw.slice(0, TOKEN_CAP_PER_STAGE) + "\n...[truncated]"
-      : raw;
+    const text  = raw.length > TOKEN_CAP_PER_STAGE ? raw.slice(0, TOKEN_CAP_PER_STAGE) + "\n...[truncated]" : raw;
     return `${label.toUpperCase()}:\n${text}`;
   }).join("\n\n");
 
@@ -258,16 +231,9 @@ ${priorWork}
 Create a tight briefing that extracts the most important context for writing a ${stage.label}. Include:
 
 ## Key Decisions Already Made
-What has already been decided that the ${stage.label} must respect?
-
 ## Established Facts
-Specific facts, numbers, names, and constraints already known.
-
 ## What's Already Ruled Out
-Things explicitly out of scope or already rejected.
-
 ## Critical Gaps
-What's still unknown that will most affect the ${stage.label}?
 
 Be specific. Use actual names, numbers, and terms from the prior work. No generic statements.`;
 
@@ -279,6 +245,334 @@ Be specific. Use actual names, numbers, and terms from the prior work. No generi
 
   return response.content[0].text;
 }
+
+// ── HEALTH CHECK ──────────────────────────────────────────────────────────────
+
+app.get("/health", (req, res) => res.json({ ok: true }));
+
+// ── DISCOVERY INTERVIEW ───────────────────────────────────────────────────────
+
+app.post("/projects/:id/discovery-interview", async (req, res) => {
+  try {
+    const project = await projectsDb.getById(req.params.id);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 600,
+      system: AGENT_RULES,
+      messages: [{
+        role: "user",
+        content: `A product team has just created a new project called: "${project.name}"
+${project.description ? "Initial description: " + project.description : "No description yet."}
+
+Run Step 1 of your process: ask 3-5 pointed, non-obvious questions to clarify the "Why," the "User Pain," and the "Technical Constraints" before any work begins.
+
+Do NOT ask generic questions like "who is your target audience?" — ask questions that would materially change the product direction if answered differently.
+
+Return ONLY a JSON array of question strings. No preamble, no markdown fences.`
+      }],
+    });
+
+    const text = response.content[0].text.trim().replace(/```json|```/g, "").trim();
+    try {
+      res.json({ questions: JSON.parse(text) });
+    } catch {
+      const lines = text.split("\n").filter(l => l.includes("?")).map(l => l.replace(/^[-*"\d.\s]+/, "").replace(/",?$/, "").trim());
+      res.json({ questions: lines.length > 0 ? lines : [text] });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── IMPROVE BRIEF ─────────────────────────────────────────────────────────────
+
+app.post("/improve-brief", async (req, res) => {
+  try {
+    const { brief } = req.body;
+    if (!brief?.trim()) return res.status(400).json({ error: "Brief required" });
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 800,
+      messages: [{
+        role: "user",
+        content: `You are a senior product strategist. Rewrite the following rough product brief into a clear, structured, and compelling description that will be used as context for AI-generated product documents.
+
+ORIGINAL BRIEF:
+${brief}
+
+Rules:
+- Keep ALL the same information — do not invent anything new
+- Structure it clearly: what the product is, who it's for, what problem it solves, the business goal, and tech stack if mentioned
+- Write in clear, professional prose — 3 to 5 sentences maximum
+- Remove filler words, vague statements, and repetition
+- Make every sentence earn its place — be specific
+
+Return only the improved brief text, no preamble, no labels, no markdown.`
+      }],
+    });
+
+    res.json({ improved: response.content[0].text.trim() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── SEMANTIC SORT ─────────────────────────────────────────────────────────────
+
+app.post("/semantic-sort", async (req, res) => {
+  try {
+    const { notes } = req.body;
+    if (!notes?.trim()) return res.status(400).json({ error: "Notes required" });
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1500,
+      messages: [{
+        role: "user",
+        content: `You are a product analyst. Categorise every distinct idea, complaint, or requirement from these raw notes into exactly four buckets.
+
+RAW NOTES:
+${notes}
+
+BUCKETS:
+- pain: User problems, frustrations, complaints, unmet needs
+- feature: Proposed solutions, product ideas, capabilities
+- tech: Technical requirements, constraints, integrations, compliance, "must use X", "no-go Y"
+- vibe: Emotional goals, strategic north stars, success feelings, brand direction
+
+Rules:
+- Split compound sentences into separate items
+- Every item must go in exactly one bucket — pick the best fit
+- Keep items as short, clear sentences
+- If a note has no clear category, put it in vibe
+
+Return ONLY a JSON object with keys: pain, feature, tech, vibe — each an array of strings.
+No preamble, no markdown fences, no explanation.`
+      }],
+    });
+
+    const text = response.content[0].text.trim().replace(/```json|```/g, "").trim();
+    res.json({ buckets: JSON.parse(text) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/semantic-enhancements", async (req, res) => {
+  try {
+    const { buckets } = req.body;
+    const painItems = (buckets.pain || []).join("\n");
+    const techItems = (buckets.tech || []).join("\n");
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      messages: [{
+        role: "user",
+        content: `You are a product researcher. Based on these user pain points and technical constraints, find 3 highly relevant tools, APIs, or patterns that could help.
+
+USER PAIN POINTS:
+${painItems || "None listed"}
+
+TECHNICAL CONSTRAINTS:
+${techItems || "None listed"}
+
+Search the web for modern solutions. Return exactly 3 suggestions as a JSON array.
+Each item must have: title (short name), description (1-2 sentences on how it solves the pain).
+
+Return ONLY the JSON array — no preamble, no markdown fences.
+Example: [{"title":"Plaid API","description":"Automates bank data ingestion, eliminating manual CSV uploads entirely."}]`
+      }],
+    });
+
+    const text = response.content.filter(b => b.type === "text").map(b => b.text).join("").trim().replace(/```json|```/g, "").trim();
+    res.json({ enhancements: JSON.parse(text) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/generate-brief", async (req, res) => {
+  try {
+    const { buckets, enhancements } = req.body;
+
+    const enhancementBlock = enhancements?.length
+      ? "\n\nSUGGESTED ENHANCEMENTS FROM RESEARCH:\n" + enhancements.map(e => `- ${e.title}: ${e.description}`).join("\n")
+      : "";
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 800,
+      messages: [{
+        role: "user",
+        content: `You are a senior product strategist. Write a structured project brief from these categorised inputs.
+
+USER PAIN (the Why):
+${(buckets.pain || []).map(i => "- " + i).join("\n") || "None"}
+
+FEATURE IDEAS (the What):
+${(buckets.feature || []).map(i => "- " + i).join("\n") || "None"}
+
+TECHNICAL CONSTRAINTS (the How boundaries):
+${(buckets.tech || []).map(i => "- " + i).join("\n") || "None"}
+
+VIBE / GOALS (the North Star):
+${(buckets.vibe || []).map(i => "- " + i).join("\n") || "None"}
+${enhancementBlock}
+
+Write a clear, professional project brief in flowing prose — 4 to 6 sentences.
+Structure it as: What + Why (from pain) → What we're building (from features) → How we'll do it (from tech + enhancements) → What success looks like (from vibe).
+Be specific. Use the actual details from the inputs. Do not use headers or bullet points.
+Return only the brief text.`
+      }],
+    });
+
+    res.json({ brief: response.content[0].text.trim() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── DOCS ──────────────────────────────────────────────────────────────────────
+
+app.get("/projects/:id/docs", async (req, res) => {
+  try { res.json(await docsDb.getAllForProject(req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/docs/:id", async (req, res) => {
+  try {
+    const doc = await docsDb.getById(req.params.id);
+    if (!doc) return res.status(404).json({ error: "Doc not found" });
+    res.json(doc);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/projects/:id/docs/generate", async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt?.trim()) return res.status(400).json({ error: "Prompt required" });
+
+    const project = await projectsDb.getById(req.params.id);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const ctx = await buildProjectContext(req.params.id, project);
+
+    let featureContext = "";
+    if (req.body.featureId) {
+      const feature = await featuresDb.getById(req.body.featureId);
+      if (feature) {
+        const fOutputs = await featureOutputsDb.getAll(feature.id);
+        featureContext = "\n\nACTIVE FEATURE: " + feature.name;
+        if (feature.description) featureContext += "\n" + feature.description;
+        fOutputs.forEach(o => {
+          featureContext += "\n\n" + (getStage(o.stage_id)?.label || o.stage_id).toUpperCase() + ":\n" + o.content;
+        });
+      }
+    }
+
+    const contextBlock = buildContextBlock(ctx) + featureContext;
+
+    const systemPrompt = `${AGENT_RULES}
+
+You also have full context about this project:
+${contextBlock}
+
+Additional rules for document generation:
+- Use ONLY information from the project context above — never invent names, dates, metrics, or details
+- If a specific detail is not in context, write [TBD] as a placeholder
+- Format output as clean Markdown with proper headers (##, ###), bullet lists, tables, and checkboxes (- [ ])`;
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const content = response.content[0].text;
+    const titleMatch = content.match(/^#+ (.+)/m);
+    const title = titleMatch ? titleMatch[1].trim() : prompt.slice(0, 60);
+
+    const doc = await docsDb.create(randomUUID(), req.params.id, title, prompt, content);
+    res.json(doc);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/docs/:id/export-docx", async (req, res) => {
+  try {
+    const doc = await docsDb.getById(req.params.id);
+    if (!doc) return res.status(404).json({ error: "Doc not found" });
+
+    const { execSync } = await import("child_process");
+    const { writeFileSync, readFileSync, unlinkSync } = await import("fs");
+    const { join } = await import("path");
+    const os = await import("os");
+
+    const tmpDir     = os.tmpdir();
+    const scriptPath = join(tmpDir, "gen_doc_" + Date.now() + ".js");
+    const outPath    = join(tmpDir, "export_" + Date.now() + ".docx");
+
+    const buildPrompt = `You are converting this Markdown document to a Node.js script that generates a .docx file using the 'docx' npm package.
+
+DOCUMENT TITLE: ${doc.title}
+
+MARKDOWN CONTENT:
+${doc.content}
+
+Write a complete Node.js CJS script (require, not import) that:
+1. Uses: const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType, LevelFormat } = require('docx');
+2. Creates a professional .docx matching the markdown structure
+3. Maps ## to HeadingLevel.HEADING_1, ### to HeadingLevel.HEADING_2
+4. Uses proper numbering config for bullet lists (LevelFormat.BULLET, never unicode bullets)
+5. Renders tables with columnWidths, ShadingType.CLEAR, dual widths
+6. Uses US Letter page size (width:12240, height:15840 DXA), 1 inch margins
+7. Writes output to: ${outPath}
+8. Ends with: Packer.toBuffer(doc).then(b => { require('fs').writeFileSync('${outPath}', b); console.log('done'); });
+
+Return ONLY the Node.js script, no explanation, no markdown fences.`;
+
+    const genRes = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4000,
+      messages: [{ role: "user", content: buildPrompt }],
+    });
+
+    let script = genRes.content[0].text.trim();
+    script = script.replace(/^```(javascript|js)?\n?/i, "").replace(/```$/, "").trim();
+
+    writeFileSync(scriptPath, script);
+    execSync("node " + scriptPath, { timeout: 30000 });
+
+    const docxBuffer = readFileSync(outPath);
+    unlinkSync(scriptPath);
+    unlinkSync(outPath);
+
+    const safeTitle = doc.title.replace(/[^a-z0-9]/gi, "_").toLowerCase();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.docx"`);
+    res.send(docxBuffer);
+  } catch (e) {
+    console.error("DOCX export error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.patch("/docs/:id", async (req, res) => {
+  try {
+    await docsDb.update(req.params.id, req.body.title, req.body.content);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete("/docs/:id", async (req, res) => {
+  try { await docsDb.delete(req.params.id); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ── PROJECTS ──────────────────────────────────────────────────────────────────
 
@@ -349,7 +643,6 @@ app.get("/projects/:id/outputs", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Get interview questions for a project stage
 app.post("/projects/:id/interview/:stageId", async (req, res) => {
   try {
     const project = await projectsDb.getById(req.params.id);
@@ -360,18 +653,14 @@ app.post("/projects/:id/interview/:stageId", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Run a project stage (with optional interview answers)
 app.post("/projects/:id/run/:stageId", async (req, res) => {
   try {
     const project = await projectsDb.getById(req.params.id);
     if (!project) return res.status(404).json({ error: "Project not found" });
 
     const ctx = await buildProjectContext(req.params.id, project);
-
-    // Inject interview answers if provided
     if (req.body.interviewAnswers) ctx.interviewAnswers = req.body.interviewAnswers;
 
-    // Distil prior context into a briefing
     const briefing = await distillContext(req.params.stageId, ctx);
     if (briefing) ctx.briefing = briefing;
 
@@ -422,7 +711,6 @@ app.get("/features/:id/outputs", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Get interview questions for a feature stage
 app.post("/features/:id/interview/:stageId", async (req, res) => {
   try {
     const feature = await featuresDb.getById(req.params.id);
@@ -434,7 +722,6 @@ app.post("/features/:id/interview/:stageId", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Run a feature stage (with optional interview answers)
 app.post("/features/:id/run/:stageId", async (req, res) => {
   try {
     const feature = await featuresDb.getById(req.params.id);
@@ -442,11 +729,8 @@ app.post("/features/:id/run/:stageId", async (req, res) => {
     const project = await projectsDb.getById(feature.project_id);
 
     const ctx = await buildFeatureContext(req.params.id, feature, project, req.params.stageId);
-
-    // Inject interview answers if provided
     if (req.body.interviewAnswers) ctx.interviewAnswers = req.body.interviewAnswers;
 
-    // Distil prior context into a briefing
     const briefing = await distillContext(req.params.stageId, ctx);
     if (briefing) ctx.briefing = briefing;
 
@@ -504,7 +788,7 @@ app.post("/chat", async (req, res) => {
       if (project.description) systemContext += "\n" + project.description;
     }
     if (constraints.length > 0) systemContext += "\n\n" + formatConstraints(constraints);
-    // Cap each stage output at 6000 chars (~1500 tokens) for chat context
+
     const CHAT_CAP = 6000;
     if (projectOutputs.length > 0) {
       systemContext += "\n\nPROJECT STRATEGY:";
