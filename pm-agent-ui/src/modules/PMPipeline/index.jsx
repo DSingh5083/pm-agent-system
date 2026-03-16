@@ -193,7 +193,9 @@ function SemanticSortModal({ onClose, onApprove }) {
   const [step,         setStep]         = useState("input");
   const [rawInput,     setRawInput]     = useState("");
   const [buckets,      setBuckets]      = useState({ pain: [], feature: [], constraint: [], vibe: [] });
-  const [enhancements, setEnhancements] = useState([]);
+  const [enhancements,         setEnhancements]         = useState([]);
+  const [googleSearchInsights, setGoogleSearchInsights] = useState([]);
+  const [productCategory,      setProductCategory]      = useState("");
   const [searchStatus, setSearchStatus] = useState(""); // background search label
   const [generating,   setGenerating]   = useState(false);
 
@@ -225,13 +227,17 @@ function SemanticSortModal({ onClose, onApprove }) {
     if (!painText) return;
     setSearchStatus("Researching enhancements...");
     try {
-      const res = await fetch(API + "/brief-enhancements", {
+      const res = await fetch(API + "/semantic-enhancements", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ buckets: b }),
       });
       const data = await res.json();
-      if (!data.error) setEnhancements(data.enhancements || []);
+      if (!data.error) {
+        setEnhancements(data.enhancements || []);
+        setGoogleSearchInsights(data.googleSearchInsights || []);
+        setProductCategory(data.productCategory || "");
+      }
     } catch {}
     finally { setSearchStatus(""); }
   };
@@ -255,10 +261,10 @@ function SemanticSortModal({ onClose, onApprove }) {
     setGenerating(true);
     setStep("generating");
     try {
-      const res = await fetch(API + "/generate-brief-from-sort", {
+      const res = await fetch(API + "/generate-brief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ buckets, enhancements }),
+        body: JSON.stringify({ buckets, enhancements, googleSearchInsights }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
