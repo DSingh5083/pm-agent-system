@@ -394,7 +394,7 @@ app.post("/semantic-sort", async (req, res) => {
         content: `You are a product analyst. Categorise every distinct idea, complaint, or requirement from these raw notes into exactly four buckets.
 
 RAW NOTES:
-${input}
+${notes}
 
 BUCKETS:
 - pain: User problems, frustrations, complaints, unmet needs
