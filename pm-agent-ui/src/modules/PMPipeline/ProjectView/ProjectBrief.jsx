@@ -12,7 +12,12 @@ export default function ProjectBrief({ value, onSave }) {
   const [showSort,  setShowSort]  = useState(false);
   const timerRef                  = useRef(null);
 
-  useEffect(() => { setDraft(value || ""); }, [value]);
+  const skipSyncRef = useRef(null);
+
+useEffect(() => {
+  if (skipSyncRef.current) { skipSyncRef.current = false; return; }
+  setDraft(value || "");
+}, [value]);
 
   const handleChange = (e) => {
     const val = e.target.value;
@@ -58,6 +63,7 @@ export default function ProjectBrief({ value, onSave }) {
     const improved = preview.improved;
     setDraft(improved);
     setPreview(null);
+    skipSyncRef.current = true; 
     setSaving(true);
     await onSave(improved);
     setSaving(false);
@@ -67,6 +73,7 @@ export default function ProjectBrief({ value, onSave }) {
   const handleSortApprove = async (brief) => {
     setShowSort(false);
     setDraft(brief);
+    skipSyncRef.current = true;
     setSaving(true);
     await onSave(brief);
     setSaving(false);
