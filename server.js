@@ -335,7 +335,7 @@ if (!input?.trim()) return res.status(400).json({ error: "Notes required" });
         content: `You are a product analyst. Categorise every distinct idea, complaint, or requirement from these raw notes into exactly four buckets.
 
 RAW NOTES:
-${notes}
+${input}
 
 BUCKETS:
 - pain: User problems, frustrations, complaints, unmet needs
