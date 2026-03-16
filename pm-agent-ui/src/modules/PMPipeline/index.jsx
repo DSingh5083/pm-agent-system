@@ -1140,13 +1140,8 @@ export default function PMPipeline({ ps, discoveryProject: externalDiscovery, on
               count={featureStageCount}
             />
 
-            <ContextInput
+            <FeatureDescriptionInput
               value={activeFeature.description}
-              color="#00AA44"
-              label="Feature Context"
-              hint="Describe this feature — scope, user problem, non-goals, any relevant technical notes."
-              placeholder="What is this feature? Who uses it, what problem does it solve, what is explicitly out of scope? Add any technical constraints or design decisions already made."
-              minRows={3}
               onSave={(desc) => updateFeature(activeFeature.id, activeFeature.name, desc)}
             />
 
