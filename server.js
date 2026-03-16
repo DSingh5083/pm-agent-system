@@ -884,6 +884,82 @@ app.post("/features/:id/run/:stageId", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// CODE-READY STORIES ──────────────────────────────────────────────────────────
+
+app.post("/features/:id/code-stories", async (req, res) => {
+  try {
+    const feature = await featuresDb.getById(req.params.id);
+    if (!feature) return res.status(404).json({ error: "Feature not found" });
+
+    const project = await projectsDb.getById(feature.project_id);
+    const [featureOutputs, constraints] = await Promise.all([
+      featureOutputsDb.getAll(feature.id),
+      constraintsDb.getAllForProject(feature.project_id),
+    ]);
+
+    // Pull PRD output as the primary source
+    const prdOutput = featureOutputs.find(o => o.stage_id === "prd");
+    if (!prdOutput) return res.status(400).json({ error: "Run the PRD stage first — stories are generated from the PRD." });
+
+    const constraintBlock = formatConstraints(constraints);
+
+    const prompt = `You are a senior engineer breaking down a feature PRD into atomic, code-ready user stories.
+
+PROJECT: ${project.name}
+${project.description ? "BRIEF: " + project.description : ""}
+
+FEATURE: ${feature.name}
+${feature.description ? feature.description : ""}
+
+${constraintBlock}
+
+PRD:
+${prdOutput.content}
+
+Break this feature into exactly 3 atomic user stories. Each story must be independently implementable by an engineer.
+
+For each story return a JSON object with these exact keys:
+- title: short story title (e.g. "User can submit parcel details form")
+- persona: who the user is (1 sentence)
+- job: the JTBD statement — "When [situation], I want to [action], so I can [outcome]"
+- dataModel: specific DB schema changes, state shape, or data structure needed
+- apiHandshake: { endpoint, method, requestExample, responseExample } — real JSON examples, not placeholders
+- acceptanceCriteria: array of exactly 4 Pass/Fail test statements starting with "PASS if..." or "FAIL if..."
+- edgeCases: array of exactly 3 edge cases — what happens when network fails, input is empty, or data is invalid
+
+Return ONLY a JSON array of 3 story objects. No preamble, no markdown fences.`;
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4000,
+      system: AGENT_RULES,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const text = response.content[0].text.trim().replace(/```json|```/g, "").trim();
+    const stories = JSON.parse(text);
+
+    // Save to feature_outputs as stage_id "code_stories"
+    const stored = JSON.stringify(stories);
+    await featureOutputsDb.save(randomUUID(), feature.id, "code_stories", stored);
+
+    res.json({ stories });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
+app.post("/features/:id/code-stories/save", async (req, res) => {
+  try {
+    const { stories } = req.body;
+    if (!stories) return res.status(400).json({ error: "Stories required" });
+    const stored = JSON.stringify(stories);
+    await featureOutputsDb.save(randomUUID(), req.params.id, "code_stories", stored);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── WRITING ENHANCER ──────────────────────────────────────────────────────────
 
 app.post("/enhance", async (req, res) => {

@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import StageCard, { SectionHeader } from "../PMPipeline/StageCard/index.jsx";
+import CodeReadyStories from "./CodeReadyStories.jsx";
 import { FEATURE_STAGES, API } from "../PMPipeline/constants.js";
 
 const FEATURE_CONTEXT_KEY = import.meta.env.VITE_API_URL || "http://localhost:3001";
@@ -155,18 +156,35 @@ export default function Features({ ps, onGoToPipeline }) {
           </div>
         )}
 
-        {/* Feature stages */}
+        {/* Feature stages — inject CodeReadyStories after PRD */}
         {FEATURE_STAGES.map(stage => (
-          <StageCard
-            key={activeFeature.id + "-" + stage.id}
-            stage={stage}
-            result={currentFeatureOutputs[stage.id] !== undefined ? currentFeatureOutputs[stage.id] : null}
-            loading={false}
-            descriptionMissing={featureDescMissing}
-            interviewEndpoint={API + "/features/" + activeFeature.id + "/interview/" + stage.id}
-            runEndpoint={API + "/features/" + activeFeature.id + "/run/" + stage.id}
-            onResult={(result) => saveFeatureOutput(activeFeature.id, stage.id, result)}
-          />
+          <div key={activeFeature.id + "-" + stage.id}>
+            <StageCard
+              stage={stage}
+              result={currentFeatureOutputs[stage.id] !== undefined ? currentFeatureOutputs[stage.id] : null}
+              loading={false}
+              descriptionMissing={featureDescMissing}
+              interviewEndpoint={API + "/features/" + activeFeature.id + "/interview/" + stage.id}
+              runEndpoint={API + "/features/" + activeFeature.id + "/run/" + stage.id}
+              onResult={(result) => saveFeatureOutput(activeFeature.id, stage.id, result)}
+            />
+            {stage.id === "prd" && (
+              <CodeReadyStories
+                key={activeFeature.id + "-stories"}
+                featureId={activeFeature.id}
+                featureName={activeFeature.name}
+                hasPrd={!!currentFeatureOutputs["prd"]}
+                initialStories={
+                  currentFeatureOutputs["code_stories"]
+                    ? (typeof currentFeatureOutputs["code_stories"] === "string"
+                        ? JSON.parse(currentFeatureOutputs["code_stories"])
+                        : currentFeatureOutputs["code_stories"])
+                    : null
+                }
+                onStoriesSaved={(stories) => saveFeatureOutput(activeFeature.id, "code_stories", stories)}
+              />
+            )}
+          </div>
         ))}
       </div>
     </div>
