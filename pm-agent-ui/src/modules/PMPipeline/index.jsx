@@ -1,15 +1,13 @@
 // PMPipeline/index.jsx
-// Thin orchestrator. Mounts the context provider and routes between views.
+// Project-only pipeline. Features have their own tab (src/modules/Features).
 // All state lives in PMPipelineContext. All AI logic lives in hooks/.
-// Edit project behaviour in ProjectView/, feature behaviour in FeatureView/.
 
 import { PMPipelineProvider, usePMPipeline } from "./PMPipelineContext.jsx";
 import ProjectView from "./ProjectView/index.jsx";
-import FeatureView from "./FeatureView/index.jsx";
 import DiscoveryInterviewModal from "./shared/DiscoveryInterview.jsx";
 
 function PipelineRouter() {
-  const { activeProject, activeFeature, discoveryProject, closeDiscovery, completeDiscovery } = usePMPipeline();
+  const { activeProject, discoveryProject, closeDiscovery, completeDiscovery } = usePMPipeline();
 
   if (!activeProject) {
     return (
@@ -30,7 +28,7 @@ function PipelineRouter() {
         />
       )}
       <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px" }}>
-        {activeFeature ? <FeatureView /> : <ProjectView />}
+        <ProjectView />
       </div>
     </div>
   );

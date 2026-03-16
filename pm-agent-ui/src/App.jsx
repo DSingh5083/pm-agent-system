@@ -8,12 +8,14 @@ import PMPipeline      from "./modules/PMPipeline/index.jsx";
 import PMChat          from "./modules/PMChat/index.jsx";
 import WritingEnhancer from "./modules/WritingEnhancer/index.jsx";
 import Docs            from "./modules/Docs/index.jsx";
+import Features        from "./modules/Features/index.jsx";
 
 const MODULES = [
   { id: "pipeline", label: "Pipeline",  icon: "⚡" },
   { id: "chat",     label: "Assistant", icon: "🧠" },
   { id: "writing",  label: "Writing",   icon: "✍️" },
   { id: "docs",     label: "Docs",      icon: "📄" },
+  { id: "features",  label: "Features",  icon: "⚙️" },
 ];
 
 function timeAgo(d) {
@@ -24,7 +26,7 @@ function timeAgo(d) {
   return `${Math.floor(s/86400)}d ago`;
 }
 
-function Sidebar({ ps, onNewProject }) {
+function Sidebar({ ps, onNewProject, onFeatureSelect }) {
   const { projects, activeProject, features, activeFeature, loading,
           loadProject, createProject, deleteProject,
           createFeature, deleteFeature, setActiveFeature } = ps;
@@ -123,7 +125,7 @@ function Sidebar({ ps, onNewProject }) {
                     return (
                       <div
                         key={f.id}
-                        onClick={() => setActiveFeature(f)}
+                        onClick={() => { setActiveFeature(f); if (onFeatureSelect) onFeatureSelect(f); }}
                         onMouseEnter={() => setHovered(f.id)}
                         onMouseLeave={() => setHovered(null)}
                         style={{ padding: "7px 10px", borderRadius: 7, marginBottom: 1, background: isFActive ? "#00AA4415" : isFHov ? "#ffffff06" : "transparent", border: `1px solid ${isFActive ? "#00AA4430" : "transparent"}`, cursor: "pointer", position: "relative", transition: "all 0.1s" }}
@@ -185,11 +187,15 @@ function Sidebar({ ps, onNewProject }) {
 export default function App() {
   const [activeModule, setActiveModule]         = useState("pipeline");
   const [discoveryProject, setDiscoveryProject] = useState(null);
+  const [prevModule,    setPrevModule]    = useState("pipeline");
   const ps = useProjects();
 
   return (
     <div style={{ display: "flex", height: "100vh", width: "100vw", overflow: "hidden", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      <Sidebar ps={ps} onNewProject={(p) => { setActiveModule("pipeline"); setDiscoveryProject(p); }} />
+      <Sidebar ps={ps}
+        onNewProject={(p) => { setActiveModule("pipeline"); setDiscoveryProject(p); }}
+        onFeatureSelect={() => { setPrevModule(activeModule); setActiveModule("features"); }}
+      />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {/* Top nav */}
@@ -232,6 +238,7 @@ export default function App() {
           {activeModule === "chat"     && <PMChat     ps={ps} />}
           {activeModule === "writing"  && <WritingEnhancer />}
           {activeModule === "docs"      && <Docs ps={ps} />}
+          {activeModule === "features"  && <Features ps={ps} onGoToPipeline={() => { setActiveModule(prevModule || "pipeline"); ps.setActiveFeature(null); }} />}
         </div>
       </div>
     </div>
