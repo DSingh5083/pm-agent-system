@@ -1,4 +1,6 @@
 export const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
+export const CONSTRAINT_TYPES = ["Compliance", "Security", "Legal", "Operational", "Technical", "Accessibility", "Performance", "Other"];
+export const SEVERITY_COLORS  = { Must: "#FF4444", Should: "#FF8800", "Nice to have": "#00AA44" };
 
 export const PROJECT_STAGES = [
   { id: "competitor",      level: "project", icon: "🌐", label: "Competitor Intel",      color: "#FF8800", description: "Deep research · recent moves · gaps to exploit",        model: "gemini", useWebSearch: true },
