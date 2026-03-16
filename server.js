@@ -62,6 +62,65 @@ You are a Senior Product Architect Agent. Your goal is to move from a "messy tho
 - Prioritise ruthlessly. Not everything deserves to be built.
 `.trim();
 
+
+// ── Google Programmable Search Engine ────────────────────────────────────────
+
+async function googlePSESearch(query, options = {}) {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  const cx     = process.env.GOOGLE_PSE_CX;
+
+  if (!apiKey || !cx) {
+    console.warn("Google PSE not configured — GOOGLE_API_KEY or GOOGLE_PSE_CX missing");
+    return [];
+  }
+
+  const params = new URLSearchParams({
+    key:        apiKey,
+    cx,
+    q:          query,
+    num:        options.num        || 5,
+    dateRestrict: options.dateRestrict || "y1",  // last 1 year by default
+    ...(options.sort ? { sort: options.sort } : {}),
+  });
+
+  try {
+    const res  = await fetch(`https://www.googleapis.com/customsearch/v1?${params}`);
+    const data = await res.json();
+    if (data.error) {
+      console.error("PSE error:", data.error.message);
+      return [];
+    }
+    return (data.items || []).map(item => ({
+      title:   item.title,
+      url:     item.link,
+      snippet: item.snippet,
+    }));
+  } catch (e) {
+    console.error("PSE fetch error:", e.message);
+    return [];
+  }
+}
+
+// Identify product category from brief text using Claude, then search for trends
+async function searchTrendsForBrief(briefText) {
+  // Step 1: extract product category
+  const catRes = await client.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 60,
+    messages: [{
+      role: "user",
+      content: `Extract the core product category from this brief in 3-5 words. Return ONLY the category, nothing else.\n\n${briefText}`
+    }],
+  });
+  const category = catRes.content[0].text.trim();
+
+  // Step 2: search for 2025-2026 trend articles
+  const query   = `${category} trends 2025 2026`;
+  const results = await googlePSESearch(query, { num: 3, dateRestrict: "m18" });
+
+  return { category, results };
+}
+
 // Serialise a context value — arrays/objects as JSON, strings as-is
 function serialise(val) {
   if (typeof val === "string") return val;
@@ -324,8 +383,8 @@ Return only the improved brief text, no preamble, no labels, no markdown.`
 
 app.post("/semantic-sort", async (req, res) => {
   try {
-    const input = req.body.input || req.body.notes;
-if (!input?.trim()) return res.status(400).json({ error: "Notes required" });
+    const notes = req.body.notes || req.body.input;
+    if (!notes?.trim()) return res.status(400).json({ error: "Notes required" });
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
@@ -364,33 +423,57 @@ No preamble, no markdown fences, no explanation.`
 app.post("/semantic-enhancements", async (req, res) => {
   try {
     const { buckets } = req.body;
-    const painItems = (buckets.pain || []).join("\n");
-    const techItems = (buckets.tech || []).join("\n");
+    const painItems  = (buckets.pain    || []).join("\n");
+    const techItems  = (buckets.tech    || []).join("\n");
+    const vibeItems  = (buckets.vibe    || []).join("\n");
+    const allBuckets = Object.values(buckets).flat().join(" ");
+
+    // PSE: search for tools/APIs that solve the pain
+    const searchQuery = `tools APIs solutions for: ${painItems.slice(0, 200)}`;
+    const [pseResults, trendsData] = await Promise.all([
+      googlePSESearch(searchQuery, { num: 5 }),
+      searchTrendsForBrief(allBuckets),
+    ]);
+
+    // Claude synthesises PSE results into actionable enhancements + trend insights
+    const pseBlock = pseResults.length
+      ? "SEARCH RESULTS:\n" + pseResults.map(r => `- ${r.title}: ${r.snippet} [${r.url}]`).join("\n")
+      : "No search results available.";
+
+    const trendsBlock = trendsData.results.length
+      ? "TREND ARTICLES (2025-2026):\n" + trendsData.results.map(r => `- ${r.title}: ${r.snippet} [${r.url}]`).join("\n")
+      : "No trend articles found.";
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      max_tokens: 1200,
       messages: [{
         role: "user",
-        content: `You are a product researcher. Based on these user pain points and technical constraints, find 3 highly relevant tools, APIs, or patterns that could help.
+        content: `You are a product researcher. Analyse these search results and extract 3 actionable enhancements for a product with these characteristics:
 
-USER PAIN POINTS:
-${painItems || "None listed"}
+USER PAIN: ${painItems || "None"}
+TECH CONSTRAINTS: ${techItems || "None"}
+GOALS: ${vibeItems || "None"}
 
-TECHNICAL CONSTRAINTS:
-${techItems || "None listed"}
+${pseBlock}
 
-Search the web for modern solutions. Return exactly 3 suggestions as a JSON array.
-Each item must have: title (short name), description (1-2 sentences on how it solves the pain).
+${trendsBlock}
 
-Return ONLY the JSON array — no preamble, no markdown fences.
-Example: [{"title":"Plaid API","description":"Automates bank data ingestion, eliminating manual CSV uploads entirely."}]`
+Return a JSON object with two keys:
+1. "enhancements": array of exactly 3 objects with: title, description (how it solves the pain), url (source link)
+2. "googleSearchInsights": array of 3 objects with: headline, summary (1-2 sentences), url — based on the trend articles above
+
+Return ONLY the JSON, no preamble, no markdown fences.`
       }],
     });
 
-    const text = response.content.filter(b => b.type === "text").map(b => b.text).join("").trim().replace(/```json|```/g, "").trim();
-    res.json({ enhancements: JSON.parse(text) });
+    const text = response.content.filter(b => b.type === "text").map(b => b.text).join("").trim().replace(/\`\`\`json|\`\`\`/g, "").trim();
+    const parsed = JSON.parse(text);
+    res.json({
+      enhancements:         parsed.enhancements || [],
+      googleSearchInsights: parsed.googleSearchInsights || [],
+      productCategory:      trendsData.category,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -401,7 +484,11 @@ app.post("/generate-brief", async (req, res) => {
     const { buckets, enhancements } = req.body;
 
     const enhancementBlock = enhancements?.length
-      ? "\n\nSUGGESTED ENHANCEMENTS FROM RESEARCH:\n" + enhancements.map(e => `- ${e.title}: ${e.description}`).join("\n")
+      ? "\n\nSUGGESTED ENHANCEMENTS FROM RESEARCH:\n" + enhancements.map(e => `- ${e.title}: ${e.description}${e.url ? " [" + e.url + "]" : ""}`).join("\n")
+      : "";
+
+    const insightsBlock = req.body.googleSearchInsights?.length
+      ? "\n\nGOOGLE SEARCH INSIGHTS (2025-2026 trends):\n" + req.body.googleSearchInsights.map(i => `- ${i.headline}: ${i.summary} [${i.url}]`).join("\n")
       : "";
 
     const response = await client.messages.create({
@@ -422,16 +509,61 @@ ${(buckets.tech || []).map(i => "- " + i).join("\n") || "None"}
 
 VIBE / GOALS (the North Star):
 ${(buckets.vibe || []).map(i => "- " + i).join("\n") || "None"}
-${enhancementBlock}
+${enhancementBlock}${insightsBlock}
 
 Write a clear, professional project brief in flowing prose — 4 to 6 sentences.
 Structure it as: What + Why (from pain) → What we're building (from features) → How we'll do it (from tech + enhancements) → What success looks like (from vibe).
 Be specific. Use the actual details from the inputs. Do not use headers or bullet points.
-Return only the brief text.`
+After the main brief paragraph, add a section titled "## Google Search Insights" that summarises the 2025-2026 trend data above in 3 bullet points. If no trend data is available, omit this section.
+Return only the brief text with the optional insights section.`
       }],
     });
 
     res.json({ brief: response.content[0].text.trim() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// RESEARCH — PSE-powered research for "Research this" chat trigger
+app.post("/research", async (req, res) => {
+  try {
+    const { query, projectId } = req.body;
+    if (!query?.trim()) return res.status(400).json({ error: "Query required" });
+
+    // Run PSE search
+    const results = await googlePSESearch(query, { num: 5, dateRestrict: "m12" });
+
+    if (!results.length) {
+      return res.json({ summary: "No results found via Google Search for: " + query, results: [] });
+    }
+
+    // Claude summarises results
+    const resultsBlock = results.map((r, i) =>
+      `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`
+    ).join("\n\n");
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 800,
+      system: AGENT_RULES,
+      messages: [{
+        role: "user",
+        content: `Summarise these Google search results about "${query}" for a product team.
+
+${resultsBlock}
+
+Write a concise research summary (3-5 bullet points). For each point cite the source as [Source: URL].
+Never invent data not present in the results. If something is missing, say "Data Not Found."
+Start with a one-line TL;DR.`
+      }],
+    });
+
+    res.json({
+      summary: response.content[0].text.trim(),
+      results,
+      query,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -661,6 +793,17 @@ app.post("/projects/:id/run/:stageId", async (req, res) => {
     const ctx = await buildProjectContext(req.params.id, project);
     if (req.body.interviewAnswers) ctx.interviewAnswers = req.body.interviewAnswers;
 
+    // For competitor stage — pre-fetch PSE results to ground Gemini analysis
+    if (req.params.stageId === "competitor" && project.description) {
+      const searchQuery = `${project.name} competitors alternatives 2025 2026`;
+      const pseResults  = await googlePSESearch(searchQuery, { num: 5, dateRestrict: "m12" });
+      if (pseResults.length) {
+        ctx.pseResults = pseResults.map((r, i) =>
+          `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`
+        ).join("\n\n");
+      }
+    }
+
     const briefing = await distillContext(req.params.stageId, ctx);
     if (briefing) ctx.briefing = briefing;
 
@@ -822,6 +965,27 @@ Trigger phrases: "I want to build", "I have an idea", "what do you think about",
 
 ## Project Context
 ${systemContext}`;
+
+  // Detect "Research this" trigger — run PSE search and prepend results to context
+  const lastUserMsg = messages[messages.length - 1]?.content || "";
+  const researchMatch = lastUserMsg.match(/research\s+(?:this[:\s]+)?(.+)/i);
+
+  if (researchMatch) {
+    try {
+      const searchQuery = researchMatch[1]?.trim() || activeProject?.name || lastUserMsg;
+      const pseResults  = await googlePSESearch(searchQuery, { num: 5, dateRestrict: "m12" });
+      if (pseResults.length) {
+        const resultsBlock = pseResults.map((r, i) =>
+          `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`
+        ).join("\n\n");
+        // Inject search results into the final user message
+        messages[messages.length - 1] = {
+          role: "user",
+          content: `${lastUserMsg}\n\nGOOGLE SEARCH RESULTS:\n${resultsBlock}\n\nSummarise these results and identify the top 5 competitors or relevant data points. Cite all sources.`,
+        };
+      }
+    } catch (e) { console.error("PSE chat search error:", e.message); }
+  }
 
   try {
     const response = await client.messages.create({
