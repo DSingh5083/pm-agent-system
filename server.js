@@ -884,6 +884,131 @@ app.post("/features/:id/run/:stageId", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// CODE-READY PRD ──────────────────────────────────────────────────────────────
+
+app.post("/features/:id/code-ready-prd", async (req, res) => {
+  try {
+    const feature = await featuresDb.getById(req.params.id);
+    if (!feature) return res.status(404).json({ error: "Feature not found" });
+
+    const project = await projectsDb.getById(feature.project_id);
+    const [featureOutputs, constraints] = await Promise.all([
+      featureOutputsDb.getAll(feature.id),
+      constraintsDb.getAllForProject(feature.project_id),
+    ]);
+
+    const prdOutput = featureOutputs.find(o => o.stage_id === "prd");
+    if (!prdOutput) return res.status(400).json({ error: "Run the PRD stage first." });
+
+    const { screenshots = [] } = req.body; // base64 images array
+
+    const constraintBlock = formatConstraints(constraints);
+
+    // Build message content — text + optional images
+    const messageContent = [];
+
+    // Add screenshots as vision inputs
+    screenshots.forEach((img, i) => {
+      messageContent.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: img.mediaType || "image/png",
+          data: img.data,
+        },
+      });
+    });
+
+    // Add the main prompt
+    messageContent.push({
+      type: "text",
+      text: `You are a Senior Technical Product Manager and Software Architect.
+
+${screenshots.length > 0 ? `I have provided ${screenshots.length} UI screenshot(s) above showing the already-built interface.` : "No UI screenshots provided — base the technical PRD on the General PRD below."}
+
+PRODUCT: ${project.name}
+${project.description ? "PROJECT BRIEF: " + project.description : ""}
+
+FEATURE: ${feature.name}
+${feature.description ? "FEATURE CONTEXT: " + feature.description : ""}
+
+${constraintBlock}
+
+GENERAL PRD:
+${prdOutput.content}
+
+Convert the above into a Code-Ready PRD for engineering execution. Follow these rules:
+- Do NOT suggest new UI changes. Stick strictly to the provided screenshots and PRD.
+- Focus 100% on wiring and logic, not design.
+
+Structure your output with exactly these 5 sections using ## headers:
+
+## 1. Component-to-Logic Mapping
+For every interactive element visible in the UI, define:
+- The element name and its frontend event (onClick, onChange, onSubmit, etc.)
+- The corresponding backend action (API endpoint, data mutation, state change)
+Format as a table: | Element | Event | Backend Action | Notes |
+
+## 2. Technical Contract
+For every API endpoint mentioned or implied:
+- Endpoint path and HTTP method
+- Exact JSON Request schema with field types and validation rules
+- Exact JSON Response schema (success and error)
+- HTTP status codes
+
+## 3. State Machine Definition
+Define all UI lifecycle states for this feature:
+- Idle: what the user sees before any action
+- Loading/Processing: visual changes during async operations
+- Success: what changes after successful completion
+- Error: what the user sees and can do on failure
+Be specific — name actual UI elements that change in each state.
+
+## 4. Edge Case Matrix
+Identify exactly 3 technical failure points. For each:
+- Failure name (e.g. Network Timeout)
+- Trigger condition
+- UI response (what the user sees)
+- Recovery action (what the user can do)
+Format as a table.
+
+## 5. Atomic Implementation Plan
+Break the build into 5-8 sequential tasks. Each task must:
+- Be executable by a coding agent in under 15 minutes
+- Have a single clear deliverable
+- Be independently testable
+Format as numbered list: Task N — [name]: [description] → Deliverable: [what exists when done]`
+    });
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 5000,
+      system: AGENT_RULES,
+      messages: [{ role: "user", content: messageContent }],
+    });
+
+    const prdContent = response.content[0].text.trim();
+
+    // Save as stage_id "code_ready_prd"
+    await featureOutputsDb.save(randomUUID(), feature.id, "code_ready_prd", prdContent);
+
+    res.json({ content: prdContent });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/features/:id/code-ready-prd/save", async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content) return res.status(400).json({ error: "Content required" });
+    await featureOutputsDb.save(randomUUID(), req.params.id, "code_ready_prd", content);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // CODE-READY STORIES ──────────────────────────────────────────────────────────
 
 app.post("/features/:id/code-stories", async (req, res) => {
