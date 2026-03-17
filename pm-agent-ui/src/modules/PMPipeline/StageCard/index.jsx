@@ -1,5 +1,5 @@
 // StageCard/index.jsx
-// Stage card UI — header, run button, expanded output.
+// Stage card UI — header, run button, expanded output, inline editing.
 // Content rendering delegated to renderers.jsx.
 
 import { useState, useEffect } from "react";
@@ -28,14 +28,75 @@ function StageOutput({ stage, result }) {
   return null;
 }
 
+// ── Inline editor ─────────────────────────────────────────────────────────────
+
+function InlineEditor({ stage, result, onSave, onCancel }) {
+  const isTickets = stage.renderer === "tickets" && Array.isArray(result);
+  const [draft, setDraft] = useState(
+    isTickets ? JSON.stringify(result, null, 2) : (result || "")
+  );
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState(null);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      let parsed = draft;
+      if (isTickets) {
+        parsed = JSON.parse(draft);
+      }
+      await onSave(parsed);
+    } catch (e) {
+      setError(isTickets ? "Invalid JSON — check your syntax" : e.message);
+      setSaving(false);
+      return;
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ padding: "16px 20px", background: "#fafafa" }}>
+      <div style={{ marginBottom: 8, fontSize: 11, color: "#888", display: "flex", alignItems: "center", gap: 8 }}>
+        <span>Editing {stage.label}</span>
+        {isTickets && <span style={{ color: "#FF8800" }}>JSON format — edit carefully</span>}
+      </div>
+      <textarea
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        rows={Math.min(30, Math.max(10, draft.split("\n").length + 2))}
+        style={{ width: "100%", padding: "12px 14px", fontSize: 12, fontFamily: isTickets ? "monospace" : "inherit", color: "#1a1a2a", lineHeight: 1.8, border: "1.5px solid " + stage.color, borderRadius: 8, outline: "none", resize: "vertical", boxSizing: "border-box", background: "#fff" }}
+      />
+      {error && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "#FF4444" }}>{error}</div>
+      )}
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button onClick={handleSave} disabled={saving}
+          style={{ padding: "6px 18px", background: saving ? "#ccc" : stage.color, border: "none", borderRadius: 7, color: "#fff", fontSize: 12, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer" }}>
+          {saving ? "Saving..." : "Save Changes"}
+        </button>
+        <button onClick={onCancel}
+          style={{ padding: "6px 14px", background: "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 7, color: "#666", fontSize: 12, cursor: "pointer" }}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Stage card ────────────────────────────────────────────────────────────────
 
 export default function StageCard({ stage, result, loading, descriptionMissing, interviewEndpoint, runEndpoint, onResult }) {
   const [expanded,      setExpanded]      = useState(false);
   const [showInterview, setShowInterview] = useState(false);
+  const [editing,       setEditing]       = useState(false);
+  const [saved,         setSaved]         = useState(false);
   const hasResult = result !== null && result !== undefined;
 
   useEffect(() => { if (hasResult) setExpanded(true); }, [hasResult]);
+  // Close editor if result changes (e.g. after Redo)
+  useEffect(() => { setEditing(false); }, [result]);
 
   const previewText = () => {
     if (!hasResult) return "";
@@ -44,6 +105,16 @@ export default function StageCard({ stage, result, loading, descriptionMissing, 
     if (typeof result === "string") return result.slice(0, 160) + "...";
     return "";
   };
+
+  const handleSave = async (updated) => {
+    await onResult(updated);
+    setEditing(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  // Tickets renderer is JSON — edit as raw text, not inline sections
+  const canEdit = hasResult && !loading && stage.renderer !== "mermaid";
 
   return (
     <>
@@ -69,7 +140,8 @@ export default function StageCard({ stage, result, loading, descriptionMissing, 
               <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a", display: "flex", alignItems: "center", gap: 7 }}>
                 {stage.label}
                 {stage.useWebSearch && <span style={{ fontSize: 9, color: "#FF8800", background: "#FF880010", padding: "1px 6px", borderRadius: 8, border: "1px solid #FF880030", fontWeight: 600 }}>🌐 Live</span>}
-                {hasResult && <span style={{ fontSize: 9, color: "#00AA44", fontFamily: "monospace" }}>✓ saved</span>}
+                {hasResult && !editing && <span style={{ fontSize: 9, color: "#00AA44", fontFamily: "monospace" }}>✓ saved</span>}
+                {saved && <span style={{ fontSize: 9, color: "#00AA44", fontFamily: "monospace" }}>✓ edited</span>}
               </div>
               <div style={{ fontSize: 11, color: "#aaa", marginTop: 1 }}>{stage.description}</div>
             </div>
@@ -81,8 +153,23 @@ export default function StageCard({ stage, result, loading, descriptionMissing, 
             {hasResult && !loading && (
               <>
                 <CopyBtn getText={() => stage.renderer === "tickets" ? JSON.stringify(result, null, 2) : result} />
-                <button onClick={() => setShowInterview(true)} style={{ padding: "4px 9px", borderRadius: 6, fontSize: 11, background: "transparent", color: stage.color, border: "1px solid " + stage.color + "40", cursor: "pointer", fontWeight: 600 }}>Redo</button>
-                <button onClick={() => setExpanded(!expanded)} style={{ padding: "4px 9px", borderRadius: 6, fontSize: 11, background: "#f5f6f8", color: "#666", border: "1px solid #e0e0e0", cursor: "pointer" }}>{expanded ? "▲" : "▼"}</button>
+                {canEdit && !editing && (
+                  <button onClick={() => { setExpanded(true); setEditing(true); }}
+                    style={{ padding: "4px 9px", borderRadius: 6, fontSize: 11, background: "#f5f6f8", color: "#555", border: "1px solid #e0e0e0", cursor: "pointer", fontWeight: 600 }}>
+                    Edit
+                  </button>
+                )}
+                {editing && (
+                  <span style={{ fontSize: 11, color: stage.color, fontFamily: "monospace" }}>editing...</span>
+                )}
+                <button onClick={() => { setEditing(false); setShowInterview(true); }}
+                  style={{ padding: "4px 9px", borderRadius: 6, fontSize: 11, background: "transparent", color: stage.color, border: "1px solid " + stage.color + "40", cursor: "pointer", fontWeight: 600 }}>
+                  Redo
+                </button>
+                <button onClick={() => { setEditing(false); setExpanded(!expanded); }}
+                  style={{ padding: "4px 9px", borderRadius: 6, fontSize: 11, background: "#f5f6f8", color: "#666", border: "1px solid #e0e0e0", cursor: "pointer" }}>
+                  {expanded ? "▲" : "▼"}
+                </button>
               </>
             )}
             {!hasResult && !loading && (
@@ -99,8 +186,20 @@ export default function StageCard({ stage, result, loading, descriptionMissing, 
           </div>
         </div>
 
-        {/* Output */}
-        {hasResult && expanded && <div style={{ padding: "16px 20px", background: "#fafafa" }}><StageOutput stage={stage} result={result} /></div>}
+        {/* Output — rendered or editing */}
+        {hasResult && expanded && !editing && (
+          <div style={{ padding: "16px 20px", background: "#fafafa" }}>
+            <StageOutput stage={stage} result={result} />
+          </div>
+        )}
+        {hasResult && expanded && editing && (
+          <InlineEditor
+            stage={stage}
+            result={result}
+            onSave={handleSave}
+            onCancel={() => setEditing(false)}
+          />
+        )}
         {hasResult && !expanded && (
           <div onClick={() => setExpanded(true)} style={{ padding: "10px 16px", fontSize: 12, color: "#999", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{previewText()}</span>
