@@ -5,13 +5,33 @@
 import { useState } from "react";
 import { API } from "../PMPipeline/constants.js";
 
+// Safely convert any value to a renderable string
+function safeStr(val) {
+  if (val === null || val === undefined) return "";
+  if (typeof val === "string") return val;
+  if (typeof val === "number" || typeof val === "boolean") return String(val);
+  return JSON.stringify(val, null, 2);
+}
+
+// Normalise a value to a flat string array for display
+function toDisplayLines(value) {
+  if (Array.isArray(value)) return value.map(safeStr);
+  if (typeof value === "object" && value !== null) return [JSON.stringify(value, null, 2)];
+  return [safeStr(value)];
+}
+
+// Normalise a value to a string for textarea editing
+function toDraftString(value) {
+  if (Array.isArray(value)) return value.map(safeStr).join("\n");
+  if (typeof value === "object" && value !== null) return JSON.stringify(value, null, 2);
+  return safeStr(value);
+}
+
 // ── Section editor ────────────────────────────────────────────────────────────
 
 function EditableSection({ label, icon, value, onSave, multiline = true }) {
   const [editing, setEditing] = useState(false);
-  const [draft,   setDraft]   = useState(
-    Array.isArray(value) ? value.join("\n") : value || ""
-  );
+  const [draft,   setDraft]   = useState(toDraftString(value));
 
   const handleSave = () => {
     const saved = multiline && Array.isArray(value)
@@ -21,7 +41,7 @@ function EditableSection({ label, icon, value, onSave, multiline = true }) {
     setEditing(false);
   };
 
-  const display = Array.isArray(value) ? value : [value];
+  const display = toDisplayLines(value);
 
   return (
     <div style={{ marginBottom: 16 }}>
@@ -40,7 +60,7 @@ function EditableSection({ label, icon, value, onSave, multiline = true }) {
             autoFocus
             value={draft}
             onChange={e => setDraft(e.target.value)}
-            rows={Array.isArray(value) ? Math.max(4, value.length + 1) : 3}
+            rows={Math.max(4, display.length + 1)}
             style={{ width: "100%", padding: "8px 10px", fontSize: 12, fontFamily: "monospace", color: "#1a1a2a", lineHeight: 1.7, border: "1.5px solid #0066FF", borderRadius: 7, outline: "none", resize: "vertical", boxSizing: "border-box" }}
           />
           <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
@@ -48,7 +68,7 @@ function EditableSection({ label, icon, value, onSave, multiline = true }) {
               style={{ padding: "4px 12px", background: "#0066FF", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
               Save
             </button>
-            <button onClick={() => { setDraft(Array.isArray(value) ? value.join("\n") : value || ""); setEditing(false); }}
+            <button onClick={() => { setDraft(toDraftString(value)); setEditing(false); }}
               style={{ padding: "4px 10px", background: "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 6, color: "#888", fontSize: 11, cursor: "pointer" }}>
               Cancel
             </button>
@@ -57,7 +77,7 @@ function EditableSection({ label, icon, value, onSave, multiline = true }) {
       ) : (
         <div style={{ background: "#f8f9fa", borderRadius: 7, padding: "9px 12px" }}>
           {display.map((line, i) => (
-            <div key={i} style={{ fontSize: 12, color: "#333", lineHeight: 1.7, fontFamily: typeof value === "string" && value.includes("{") ? "monospace" : "inherit" }}>
+            <div key={i} style={{ fontSize: 12, color: "#333", lineHeight: 1.7, fontFamily: "monospace", whiteSpace: "pre-wrap" }}>
               {line}
             </div>
           ))}
@@ -141,8 +161,8 @@ function StoryCard({ story, index, onChange }) {
           {index + 1}
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a" }}>{story.title}</div>
-          {story.persona && <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>{story.persona}</div>}
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a" }}>{safeStr(story.title)}</div>
+          {story.persona && <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>{safeStr(story.persona)}</div>}
         </div>
         <span style={{ fontSize: 12, color: "#ccc" }}>{expanded ? "▲" : "▼"}</span>
       </div>
@@ -153,7 +173,7 @@ function StoryCard({ story, index, onChange }) {
           {/* JTBD */}
           <div style={{ marginBottom: 16, padding: "10px 14px", background: "#7B2FFF08", border: "1px solid #7B2FFF18", borderRadius: 8 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: "#7B2FFF", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>🎯 Job to be Done</div>
-            <div style={{ fontSize: 12, color: "#333", lineHeight: 1.7, fontStyle: "italic" }}>{story.job}</div>
+            <div style={{ fontSize: 12, color: "#333", lineHeight: 1.7, fontStyle: "italic" }}>{safeStr(story.job)}</div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
