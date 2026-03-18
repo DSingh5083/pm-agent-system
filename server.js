@@ -6,10 +6,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb } from "./db.js";
 import { runStage } from "./agents/stageRunner.js";
 import { getStage } from "./stageRegistry.js";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 dotenv.config();
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const geminiClient = process.env.GEMINI_API_KEY
+  ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+  : null;
 
 // OpenAI client (Agent B — The Skeptic)
 let openaiClient = null;
