@@ -10,6 +10,13 @@ import { getStage } from "./stageRegistry.js";
 dotenv.config();
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// OpenAI client (Agent B — The Skeptic)
+let openaiClient = null;
+if (process.env.OPENAI_API_KEY) {
+  const { default: OpenAI } = await import("openai");
+  openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
 const app = express();
 
 const ALLOWED_ORIGINS = [

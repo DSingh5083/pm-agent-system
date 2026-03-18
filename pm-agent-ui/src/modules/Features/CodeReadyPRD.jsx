@@ -146,6 +146,9 @@ export default function CodeReadyPRD({ featureId, featureName, hasPrd, initialCo
   const [screenshots, setScreenshots] = useState([]);
   const [content,     setContent]     = useState(initialContent || null);
   const [generating,  setGenerating]  = useState(false);
+  const [phase,       setPhase]       = useState(null); // null | "agents" | "synthesis" | "validation" | "done"
+  const [drafts,      setDrafts]      = useState(null); // { agentA, agentB, agentC }
+  const [showDrafts,  setShowDrafts]  = useState(false);
   const [saving,      setSaving]      = useState(false);
   const [lastSaved,   setLastSaved]   = useState(null);
   const [error,       setError]       = useState(null);
@@ -156,8 +159,15 @@ export default function CodeReadyPRD({ featureId, featureName, hasPrd, initialCo
 
   const generate = async () => {
     setGenerating(true);
+    setPhase("agents");
     setError(null);
+    setDrafts(null);
     try {
+      // Phase 1 takes ~20-30s, synthesis ~15s, validation ~5s
+      // We simulate phase transitions by time since server does all phases in one call
+      const phaseTimer1 = setTimeout(() => setPhase("synthesis"), 25000);
+      const phaseTimer2 = setTimeout(() => setPhase("validation"), 45000);
+
       const res  = await fetch(API + "/features/" + featureId + "/code-ready-prd", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -165,15 +175,23 @@ export default function CodeReadyPRD({ featureId, featureName, hasPrd, initialCo
           screenshots: screenshots.map(s => ({ data: s.data, mediaType: s.mediaType })),
         }),
       });
+
+      clearTimeout(phaseTimer1);
+      clearTimeout(phaseTimer2);
+
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+
+      setPhase("done");
       setContent(data.content);
       setRawDraft(data.content);
+      if (data.drafts) setDrafts(data.drafts);
       if (onSaved) onSaved(data.content);
     } catch (e) {
       setError(e.message);
     } finally {
       setGenerating(false);
+      setPhase(null);
     }
   };
 
@@ -238,6 +256,12 @@ export default function CodeReadyPRD({ featureId, featureName, hasPrd, initialCo
           <div style={{ display: "flex", gap: 8 }}>
             {content && (
               <>
+                {drafts && (
+                  <button onClick={() => setShowDrafts(v => !v)}
+                    style={{ padding: "5px 12px", background: showDrafts ? "#1a1a2a" : "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 7, color: showDrafts ? "#fff" : "#666", fontSize: 11, cursor: "pointer" }}>
+                    {showDrafts ? "Hide Drafts" : "View Agent Drafts"}
+                  </button>
+                )}
                 <button onClick={() => setRawView(v => !v)}
                   style={{ padding: "5px 12px", background: rawView ? "#1a1a2a" : "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 7, color: rawView ? "#fff" : "#666", fontSize: 11, cursor: "pointer" }}>
                   {rawView ? "Structured View" : "Raw Edit"}
@@ -283,16 +307,95 @@ export default function CodeReadyPRD({ featureId, featureName, hasPrd, initialCo
 
       {/* Generating spinner */}
       {generating && (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "40px 0", gap: 12, color: "#aaa", background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0" }}>
-          <span style={{ fontSize: 32, animation: "spin 1s linear infinite", display: "inline-block" }}>🔧</span>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>Generating Code-Ready PRD...</div>
-          <div style={{ fontSize: 11, color: "#bbb", textAlign: "center", maxWidth: 340, lineHeight: 1.6 }}>
-            Mapping UI components → Defining API contracts → Writing state machine → Identifying edge cases
+        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", overflow: "hidden" }}>
+          {/* Phase tracker */}
+          <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #f5f5f5" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a", marginBottom: 16 }}>Running Multi-Agent Analysis...</div>
+            <div style={{ display: "flex", gap: 0 }}>
+              {[
+                { key: "agents",     label: "Phase 1",    sub: "3 Agents in Parallel",    icon: "🤖", color: "#0066FF" },
+                { key: "synthesis",  label: "Phase 2",    sub: "Synthesis & Conflict Resolution", icon: "🧠", color: "#7B2FFF" },
+                { key: "validation", label: "Phase 3",    sub: "Validation Check",         icon: "✅", color: "#00AA44" },
+              ].map((p, i) => {
+                const phaseOrder = { agents: 0, synthesis: 1, validation: 2, done: 3 };
+                const current    = phaseOrder[phase] ?? 0;
+                const isActive   = phaseOrder[p.key] === current;
+                const isDone     = phaseOrder[p.key] < current;
+                return (
+                  <div key={p.key} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, position: "relative" }}>
+                    {i > 0 && <div style={{ position: "absolute", left: 0, top: 18, width: "50%", height: 2, background: isDone ? p.color : "#f0f0f0", transition: "background 0.5s" }} />}
+                    {i < 2 && <div style={{ position: "absolute", right: 0, top: 18, width: "50%", height: 2, background: phaseOrder[p.key] < (phaseOrder[phase] ?? 0) - 0.5 ? p.color : "#f0f0f0", transition: "background 0.5s" }} />}
+                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: isDone ? p.color : isActive ? p.color + "22" : "#f5f5f5", border: "2px solid " + (isDone || isActive ? p.color : "#e0e0e0"), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, zIndex: 1, transition: "all 0.3s" }}>
+                      {isDone ? "✓" : isActive ? <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>{p.icon}</span> : p.icon}
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: isDone || isActive ? p.color : "#bbb" }}>{p.label}</div>
+                    <div style={{ fontSize: 10, color: "#aaa", textAlign: "center", maxWidth: 100 }}>{p.sub}</div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+
+          {/* Agent status */}
+          {phase === "agents" && (
+            <div style={{ padding: "14px 24px", display: "flex", gap: 16 }}>
+              {[
+                { label: "Agent A", name: "Claude",  role: "The Architect",  color: "#0066FF", icon: "🏗️" },
+                { label: "Agent B", name: "GPT-4o",  role: "The Skeptic",    color: "#00AA44", icon: "🔍" },
+                { label: "Agent C", name: "Gemini",  role: "The Researcher", color: "#FF8800", icon: "🌐" },
+              ].map(a => (
+                <div key={a.name} style={{ flex: 1, padding: "10px 12px", background: a.color + "08", border: "1px solid " + a.color + "22", borderRadius: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: a.color, display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                    <span style={{ animation: "spin 2s linear infinite", display: "inline-block" }}>{a.icon}</span>
+                    {a.label} — {a.name}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#aaa" }}>{a.role}</div>
+                  <div style={{ fontSize: 10, color: a.color + "99", marginTop: 3, fontStyle: "italic" }}>Analysing PRD...</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {phase === "synthesis" && (
+            <div style={{ padding: "14px 24px", fontSize: 12, color: "#555", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ animation: "spin 1s linear infinite", display: "inline-block", fontSize: 20 }}>🧠</span>
+              Resolving conflicts between 3 drafts · Picking the strongest approach for each section · Writing Master PRD...
+            </div>
+          )}
+          {phase === "validation" && (
+            <div style={{ padding: "14px 24px", fontSize: 12, color: "#555", display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ animation: "spin 1s linear infinite", display: "inline-block", fontSize: 20 }}>✅</span>
+              Running validation — checking if a coding agent could build from this PRD alone...
+            </div>
+          )}
         </div>
       )}
 
       {/* Content */}
+      {/* Agent drafts panel */}
+      {drafts && showDrafts && !generating && (
+        <div style={{ marginBottom: 16 }}>
+          {[
+            { key: "agentA", label: "Agent A — Claude (Architect)",  color: "#0066FF", icon: "🏗️" },
+            { key: "agentB", label: "Agent B — GPT-4o (Skeptic)",    color: "#00AA44", icon: "🔍" },
+            { key: "agentC", label: "Agent C — Gemini (Researcher)", color: "#FF8800", icon: "🌐" },
+          ].map(a => drafts[a.key] ? (
+            <details key={a.key} style={{ marginBottom: 8, background: "#fff", border: "1px solid " + a.color + "22", borderRadius: 10, overflow: "hidden" }}>
+              <summary style={{ padding: "10px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700, color: a.color, background: a.color + "06", listStyle: "none", display: "flex", alignItems: "center", gap: 8 }}>
+                <span>{a.icon}</span>{a.label}
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "#aaa", fontWeight: 400 }}>click to expand</span>
+              </summary>
+              <pre style={{ padding: "12px 16px", fontSize: 11, fontFamily: "monospace", color: "#444", lineHeight: 1.7, whiteSpace: "pre-wrap", margin: 0, maxHeight: 400, overflow: "auto" }}>
+                {drafts[a.key]}
+              </pre>
+            </details>
+          ) : (
+            <div key={a.key} style={{ marginBottom: 8, padding: "10px 14px", background: "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 10, fontSize: 12, color: "#aaa" }}>
+              {a.icon} {a.label} — not available (API key missing or quota exceeded)
+            </div>
+          ))}
+        </div>
+      )}
+
       {content && !generating && (
         rawView ? (
           <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 12, overflow: "hidden" }}>
