@@ -3,6 +3,7 @@
 // Content rendering delegated to renderers.jsx.
 
 import { useState, useEffect } from "react";
+const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
 import InterviewModal from "../shared/InterviewModal.jsx";
 import { SectionedText, TicketList, MermaidDiagram } from "./renderers.jsx";
 
@@ -15,6 +16,57 @@ function CopyBtn({ getText }) {
       onClick={() => { navigator.clipboard.writeText(getText()); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
       style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, background: copied ? "#00AA4422" : "#f5f6f8", color: copied ? "#00AA44" : "#888", border: "1px solid " + (copied ? "#00AA4433" : "#e0e0e0"), cursor: "pointer" }}>
       {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+
+// ── Notion push button ────────────────────────────────────────────────────────
+
+function NotionPushBtn({ stage, result, projectName, featureName }) {
+  const [status, setStatus] = useState("idle"); // idle | pushing | done | error
+  const [url,    setUrl]    = useState(null);
+
+  const push = async () => {
+    setStatus("pushing");
+    try {
+      const res  = await fetch(API + "/notion/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectName,
+          featureName,
+          stageId:    stage.id,
+          stageLabel: stage.label,
+          content:    result,
+          renderer:   stage.renderer,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setUrl(data.url);
+      setStatus("done");
+      setTimeout(() => setStatus("idle"), 4000);
+    } catch (e) {
+      console.error("Notion push failed:", e.message);
+      setStatus("error");
+      setTimeout(() => setStatus("idle"), 3000);
+    }
+  };
+
+  if (status === "done" && url) {
+    return (
+      <a href={url} target="_blank" rel="noreferrer"
+        style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, background: "#00AA4422", color: "#00AA44", border: "1px solid #00AA4433", textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}>
+        ✓ Opened in Notion
+      </a>
+    );
+  }
+
+  return (
+    <button onClick={push} disabled={status === "pushing"}
+      style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, background: status === "error" ? "#FF444422" : "#f5f6f8", color: status === "error" ? "#FF4444" : "#555", border: "1px solid " + (status === "error" ? "#FF444433" : "#e0e0e0"), cursor: status === "pushing" ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+      {status === "pushing" ? "Pushing..." : status === "error" ? "Failed" : "📋 Notion"}
     </button>
   );
 }
@@ -87,7 +139,7 @@ function InlineEditor({ stage, result, onSave, onCancel }) {
 
 // ── Stage card ────────────────────────────────────────────────────────────────
 
-export default function StageCard({ stage, result, loading, descriptionMissing, interviewEndpoint, runEndpoint, onResult }) {
+export default function StageCard({ stage, result, loading, descriptionMissing, interviewEndpoint, runEndpoint, onResult, projectName, featureName }) {
   const [expanded,      setExpanded]      = useState(false);
   const [showInterview, setShowInterview] = useState(false);
   const [editing,       setEditing]       = useState(false);
@@ -153,6 +205,12 @@ export default function StageCard({ stage, result, loading, descriptionMissing, 
             {hasResult && !loading && (
               <>
                 <CopyBtn getText={() => stage.renderer === "tickets" ? JSON.stringify(result, null, 2) : result} />
+                <NotionPushBtn
+                  stage={stage}
+                  result={result}
+                  projectName={projectName}
+                  featureName={featureName}
+                />
                 {canEdit && !editing && (
                   <button onClick={() => { setExpanded(true); setEditing(true); }}
                     style={{ padding: "4px 9px", borderRadius: 6, fontSize: 11, background: "#f5f6f8", color: "#555", border: "1px solid #e0e0e0", cursor: "pointer", fontWeight: 600 }}>

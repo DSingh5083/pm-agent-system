@@ -55,6 +55,7 @@ export default function ProjectView() {
           interviewEndpoint={API + "/projects/" + activeProject.id + "/interview/" + stage.id}
           runEndpoint={API + "/projects/" + activeProject.id + "/run/" + stage.id}
           onResult={(result) => saveProjectOutput(stage.id, result)}
+          projectName={activeProject.name}
         />
       ))}
     </>

@@ -74,6 +74,8 @@ export default function FeatureView() {
           interviewEndpoint={API + "/features/" + activeFeature.id + "/interview/" + stage.id}
           runEndpoint={API + "/features/" + activeFeature.id + "/run/" + stage.id}
           onResult={(result) => saveFeatureOutput(activeFeature.id, stage.id, result)}
+          projectName={activeProject.name}
+          featureName={activeFeature.name}
         />
       ))}
     </div>

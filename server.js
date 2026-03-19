@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { Client as NotionClient } from "@notionhq/client";
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb } from "./db.js";
 import { runStage } from "./agents/stageRunner.js";
 import { getStage } from "./stageRegistry.js";
@@ -14,6 +15,12 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const geminiClient = process.env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
   : null;
+
+const notionClient = process.env.NOTION_API_KEY
+  ? new NotionClient({ auth: process.env.NOTION_API_KEY })
+  : null;
+
+const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID || "";
 
 // OpenAI client (Agent B — The Skeptic)
 let openaiClient = null;
@@ -139,36 +146,6 @@ function formatConstraints(constraints) {
     `${c.severity.toUpperCase()}: [${c.type}] ${c.title} — ${c.description}`
   );
   return `PROJECT CONSTRAINTS (must be respected in all feature work):\n${lines.join("\n")}`;
-}
-
-// - Notion integration for docs export (optional) - requires NOTION_API_KEY and NOTION_PARENT_PAGE_ID env vars------
-
-const { Client } = require("@notionhq/client");
-
-const notion = new Client({ auth: process.env.NOTION_KEY });
-
-async function createPRDPage(databaseId, title, summary) {
-  const response = await notion.pages.create({
-    parent: { database_id: databaseId },
-    properties: {
-      Name: {
-        title: [{ text: { content: title } }],
-      },
-    },
-    children: [
-      {
-        object: "block",
-        type: "heading_2",
-        heading_2: { rich_text: [{ text: { content: "Product Summary" } }] },
-      },
-      {
-        object: "block",
-        type: "paragraph",
-        paragraph: { rich_text: [{ text: { content: summary } }] },
-      },
-    ],
-  });
-  console.log("PRD Created:", response.url);
 }
 
 // ── Agent Rules ───────────────────────────────────────────────────────────────
@@ -438,6 +415,160 @@ Be specific. Use actual names, numbers, and terms from the prior work. No generi
   });
 
   return response.content[0].text;
+}
+
+// ── NOTION ───────────────────────────────────────────────────────────────────
+
+app.post("/notion/push", async (req, res) => {
+  try {
+    if (!notionClient) return res.status(503).json({ error: "NOTION_API_KEY not configured." });
+    if (!NOTION_DATABASE_ID) return res.status(503).json({ error: "NOTION_DATABASE_ID not configured." });
+
+    const { projectName, featureName, stageId, stageLabel, content, renderer } = req.body;
+    if (!content) return res.status(400).json({ error: "Content required." });
+
+    // Convert content to Notion blocks
+    const blocks = contentToBlocks(content, renderer);
+
+    // Check if a page already exists for this project+feature+stage
+    const search = await notionClient.databases.query({
+      database_id: NOTION_DATABASE_ID,
+      filter: {
+        and: [
+          { property: "Project",  rich_text: { equals: projectName  || "" } },
+          { property: "Feature",  rich_text: { equals: featureName  || "" } },
+          { property: "Stage",    select:    { equals: stageLabel   || stageId } },
+        ],
+      },
+    });
+
+    const now = new Date().toISOString();
+
+    if (search.results.length > 0) {
+      // Update existing page
+      const pageId = search.results[0].id;
+
+      // Clear existing blocks then append new ones
+      const existing = await notionClient.blocks.children.list({ block_id: pageId });
+      await Promise.all(
+        existing.results.map(b => notionClient.blocks.delete({ block_id: b.id }))
+      );
+      await notionClient.blocks.children.append({ block_id: pageId, children: blocks });
+
+      // Update Last Synced property
+      await notionClient.pages.update({
+        page_id: pageId,
+        properties: { "Last Synced": { date: { start: now } } },
+      });
+
+      res.json({ ok: true, action: "updated", pageId, url: search.results[0].url });
+    } else {
+      // Create new page
+      const page = await notionClient.pages.create({
+        parent:     { database_id: NOTION_DATABASE_ID },
+        icon:       { type: "emoji", emoji: stageEmoji(stageId) },
+        properties: {
+          Name:          { title:     [{ text: { content: `${stageLabel || stageId} — ${featureName || projectName}` } }] },
+          Project:       { rich_text: [{ text: { content: projectName  || "" } }] },
+          Feature:       { rich_text: [{ text: { content: featureName  || "" } }] },
+          Stage:         { select:    { name: stageLabel || stageId } },
+          Status:        { select:    { name: "Draft" } },
+          "Last Synced": { date:      { start: now } },
+        },
+        children: blocks,
+      });
+
+      res.json({ ok: true, action: "created", pageId: page.id, url: page.url });
+    }
+  } catch (e) {
+    console.error("Notion push error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Notion helpers ────────────────────────────────────────────────────────────
+
+function stageEmoji(stageId) {
+  const map = {
+    competitor: "🌐", market_analysis: "📊", roadmap: "🗺️", gtm: "🚀",
+    prd: "📄", architecture: "🏗️", flow: "🔀", ui_spec: "🎨",
+    diagram: "📐", review: "🔍", tickets: "🎫",
+    code_ready_prd: "🔧", code_stories: "📋",
+  };
+  return map[stageId] || "📝";
+}
+
+function contentToBlocks(content, renderer) {
+  const blocks = [];
+
+  // Tickets — format as a table-like list
+  if (renderer === "tickets") {
+    let tickets = content;
+    if (typeof content === "string") {
+      try { tickets = JSON.parse(content); } catch { tickets = []; }
+    }
+    if (Array.isArray(tickets)) {
+      tickets.forEach(t => {
+        blocks.push({
+          object: "block", type: "heading_3",
+          heading_3: { rich_text: [{ type: "text", text: { content: t.title || "Untitled" } }] },
+        });
+        if (t.description) {
+          blocks.push({
+            object: "block", type: "paragraph",
+            paragraph: { rich_text: [{ type: "text", text: { content: t.description } }] },
+          });
+        }
+        if (t.acceptanceCriteria?.length) {
+          t.acceptanceCriteria.forEach(ac => {
+            blocks.push({
+              object: "block", type: "bulleted_list_item",
+              bulleted_list_item: { rich_text: [{ type: "text", text: { content: ac } }] },
+            });
+          });
+        }
+        blocks.push({ object: "block", type: "divider", divider: {} });
+      });
+      return blocks;
+    }
+  }
+
+  // Plain text / markdown — parse into Notion blocks
+  const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+  const lines = text.split("\n");
+
+  lines.forEach(line => {
+    if (!line.trim()) {
+      blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: [] } });
+      return;
+    }
+    if (/^# /.test(line)) {
+      blocks.push({ object: "block", type: "heading_1", heading_1: { rich_text: [{ type: "text", text: { content: line.replace(/^# /, "") } }] } });
+    } else if (/^## /.test(line)) {
+      blocks.push({ object: "block", type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: line.replace(/^## /, "") } }] } });
+    } else if (/^### /.test(line)) {
+      blocks.push({ object: "block", type: "heading_3", heading_3: { rich_text: [{ type: "text", text: { content: line.replace(/^### /, "") } }] } });
+    } else if (/^[-*] /.test(line)) {
+      blocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: [{ type: "text", text: { content: line.replace(/^[-*] /, "") } }] } });
+    } else if (/^\d+\. /.test(line)) {
+      blocks.push({ object: "block", type: "numbered_list_item", numbered_list_item: { rich_text: [{ type: "text", text: { content: line.replace(/^\d+\. /, "") } }] } });
+    } else if (/^\|/.test(line) && !/^\|[-:]+/.test(line)) {
+      // Table rows — convert to bulleted list (Notion tables require complex setup)
+      const cells = line.split("|").filter((_, i, a) => i > 0 && i < a.length - 1).map(c => c.trim()).join(" | ");
+      if (cells) blocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: [{ type: "text", text: { content: cells } }] } });
+    } else if (/^```/.test(line)) {
+      // Skip code fence markers
+    } else {
+      // Notion blocks have a 2000 char limit per block
+      const chunks = line.match(/.{1,1900}/g) || [line];
+      chunks.forEach(chunk => {
+        blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: chunk } }] } });
+      });
+    }
+  });
+
+  // Notion allows max 100 blocks per request
+  return blocks.slice(0, 100);
 }
 
 // ── HEALTH CHECK ──────────────────────────────────────────────────────────────
