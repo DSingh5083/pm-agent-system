@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState } from "react";
+import AuthGate from "./components/AuthGate.jsx";
 import { useProjects } from "./lib/useProject.js";
 import PMPipeline      from "./modules/PMPipeline/index.jsx";
 import PMChat          from "./modules/PMChat/index.jsx";
@@ -181,6 +182,7 @@ function Sidebar({ ps, onNewProject, onFeatureSelect }) {
         ))}
       </div>
     </div>
+    </AuthGate>
   );
 }
 
@@ -191,6 +193,7 @@ export default function App() {
   const ps = useProjects();
 
   return (
+    <AuthGate>
     <div style={{ display: "flex", height: "100vh", width: "100vw", overflow: "hidden", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <Sidebar ps={ps}
         onNewProject={(p) => { setActiveModule("pipeline"); setDiscoveryProject(p); }}
@@ -242,5 +245,6 @@ export default function App() {
         </div>
       </div>
     </div>
+    </AuthGate>
   );
 }

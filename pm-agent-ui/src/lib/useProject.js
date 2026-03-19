@@ -154,12 +154,21 @@ export function useProjects() {
     setProjectOutputs(prev => ({ ...prev, [stageId]: content }));
   }, []);
 
-  const saveFeatureOutput = useCallback((featureId, stageId, content) => {
+  const saveFeatureOutput = useCallback(async (featureId, stageId, content) => {
+    // Optimistic UI update — immediately reflect in state
     setFeatureOutputs(prev => ({
       ...prev,
       [featureId]: { ...(prev[featureId] || {}), [stageId]: content },
     }));
-    setFeatures(prev => prev.map(f => f.id === featureId ? { ...f, output_count: (f.output_count || 0) + 1 } : f));
+    setFeatures(prev => prev.map(f =>
+      f.id === featureId ? { ...f, output_count: Object.keys({...(featureId in prev ? prev[featureId] : {}), [stageId]: content}).length } : f
+    ));
+    // Persist to DB — fire and forget, state is already updated
+    try {
+      await api("POST", "/features/" + featureId + "/outputs/save", { stageId, content: typeof content === "string" ? content : JSON.stringify(content) });
+    } catch (e) {
+      console.error("Failed to persist feature output:", e.message);
+    }
   }, []);
 
   // CHAT
