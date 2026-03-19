@@ -141,6 +141,36 @@ function formatConstraints(constraints) {
   return `PROJECT CONSTRAINTS (must be respected in all feature work):\n${lines.join("\n")}`;
 }
 
+// - Notion integration for docs export (optional) - requires NOTION_API_KEY and NOTION_PARENT_PAGE_ID env vars------
+
+const { Client } = require("@notionhq/client");
+
+const notion = new Client({ auth: process.env.NOTION_KEY });
+
+async function createPRDPage(databaseId, title, summary) {
+  const response = await notion.pages.create({
+    parent: { database_id: databaseId },
+    properties: {
+      Name: {
+        title: [{ text: { content: title } }],
+      },
+    },
+    children: [
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: { rich_text: [{ text: { content: "Product Summary" } }] },
+      },
+      {
+        object: "block",
+        type: "paragraph",
+        paragraph: { rich_text: [{ text: { content: summary } }] },
+      },
+    ],
+  });
+  console.log("PRD Created:", response.url);
+}
+
 // ── Agent Rules ───────────────────────────────────────────────────────────────
 
 const AGENT_RULES = `
