@@ -182,7 +182,6 @@ function Sidebar({ ps, onNewProject, onFeatureSelect }) {
         ))}
       </div>
     </div>
-    </AuthGate>
   );
 }
 
