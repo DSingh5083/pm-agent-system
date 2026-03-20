@@ -1517,7 +1517,7 @@ ${systemContext}`;
 
 // ── START ─────────────────────────────────────────────────────────────────────
 
-Promise.all([initDb(), initNotion()]).then(() => {
+Promise.all([initDb()]).then(() => {
   app.listen(3001, () => {
     console.log("PM Agent server running on http://localhost:3001");
     console.log("API Key:", process.env.ANTHROPIC_API_KEY ? "loaded" : "MISSING");
