@@ -4,8 +4,7 @@ import dotenv from "dotenv";
 import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import pkg from "@notionhq/client";
-const { Client: NotionClient } = pkg;
+import * as notionPkg from "@notionhq/client";
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb } from "./db.js";
 import { runStage } from "./agents/stageRunner.js";
 import { getStage } from "./stageRegistry.js";
@@ -17,8 +16,11 @@ const geminiClient = process.env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
   : null;
 
-const notionClient = process.env.NOTION_API_KEY
-  ? new NotionClient({ auth: process.env.NOTION_API_KEY })
+const NotionClientClass = notionPkg.Client || notionPkg.default?.Client || notionPkg.default;
+console.log("Notion pkg keys:", Object.keys(notionPkg));
+console.log("Notion ClientClass:", typeof NotionClientClass);
+const notionClient = process.env.NOTION_API_KEY && NotionClientClass
+  ? new NotionClientClass({ auth: process.env.NOTION_API_KEY })
   : null;
 
 const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID || "";
