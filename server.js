@@ -43,7 +43,7 @@ app.use(cors({
     callback(new Error("Not allowed by CORS: " + origin));
   },
   methods: ["POST", "GET", "DELETE", "PATCH"],
-  allowedHeaders: ["Content-Type"],
+  allowedHeaders: ["Content-Type","x-app-password"],
 }));
 app.use(express.json({ limit: "10mb" }));
 

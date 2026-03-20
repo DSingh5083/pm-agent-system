@@ -37,27 +37,30 @@ export default function AuthGate({ children }) {
   };
 
   const handleSubmit = async () => {
-    if (!password.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(API + "/health", {
-        headers: { "x-app-password": password },
-      });
-      if (res.status === 401) {
-        setError("Incorrect password");
-        setLoading(false);
-        return;
-      }
-      sessionStorage.setItem(STORAGE_KEY, password);
-      setStatus("authed");
-    } catch {
-      setError("Could not reach server");
-    } finally {
+  const pw = password.trim();
+  if (!pw) return;
+  setLoading(true);
+  setError(null);
+  try {
+    const res = await fetch(API + "/health", {
+      headers: { 
+        "x-app-password": pw,
+        "Content-Type": "application/json",
+      },
+    });
+    if (res.status === 401) {
+      setError("Incorrect password");
       setLoading(false);
+      return;
     }
-  };
-
+    sessionStorage.setItem(STORAGE_KEY, pw);
+    setStatus("authed");
+  } catch {
+    setError("Could not reach server");
+  } finally {
+    setLoading(false);
+  }
+};
   if (status === "checking") {
     return (
       <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: "#0f1117" }}>
