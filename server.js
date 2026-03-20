@@ -7,8 +7,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createRequire } from "module";
 const _require = createRequire(import.meta.url);
 const { Client: NotionClient } = _require("@notionhq/client");
-import { initDb, projectsDb, ...
-
+import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb } from "./db.js";
 dotenv.config();
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
