@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
+import { apiFetch, API } from "../../../lib/api";
 
 // Starter prompts shown when no project context yet
 const STARTER_PROMPTS = [
@@ -13,7 +12,6 @@ const STARTER_PROMPTS = [
 ];
 
 // ── Markdown renderer ─────────────────────────────────────────────────────────
-// Renders markdown to rich UI — headers, bullets, tables, checkboxes, bold, code
 
 function renderMarkdown(md, onCheckboxToggle) {
   if (!md) return null;
@@ -24,7 +22,6 @@ function renderMarkdown(md, onCheckboxToggle) {
 
   const nextKey = () => ++key;
 
-  // Inline formatting: bold, italic, code, links
   function inlineFormat(text) {
     const parts = [];
     const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|\[(.+?)\]\((.+?)\))/g;
@@ -44,7 +41,6 @@ function renderMarkdown(md, onCheckboxToggle) {
   while (i < lines.length) {
     const line = lines[i];
 
-    // H1
     if (/^# (.+)/.test(line)) {
       const text = line.replace(/^# /, "");
       elements.push(
@@ -55,7 +51,6 @@ function renderMarkdown(md, onCheckboxToggle) {
       i++; continue;
     }
 
-    // H2
     if (/^## (.+)/.test(line)) {
       const text = line.replace(/^## /, "");
       elements.push(
@@ -67,30 +62,24 @@ function renderMarkdown(md, onCheckboxToggle) {
       i++; continue;
     }
 
-    // H3
     if (/^### (.+)/.test(line)) {
       const text = line.replace(/^### /, "");
       elements.push(
-        <h3 key={nextKey()} style={{ fontSize: 14, fontWeight: 700, color: "#333", margin: "16px 0 4px", textTransform: "uppercase", letterSpacing: "0.05em", fontSize: 12, color: "#888" }}>
+        <h3 key={nextKey()} style={{ fontSize: 12, fontWeight: 700, color: "#888", margin: "16px 0 4px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
           {inlineFormat(text)}
         </h3>
       );
       i++; continue;
     }
 
-    // Horizontal rule
     if (/^---+$/.test(line.trim())) {
       elements.push(<hr key={nextKey()} style={{ border: "none", borderTop: "1px solid #e8e8e8", margin: "16px 0" }} />);
       i++; continue;
     }
 
-    // Table
     if (/^\|.+\|/.test(line)) {
       const tableLines = [];
-      while (i < lines.length && /^\|/.test(lines[i])) {
-        tableLines.push(lines[i]);
-        i++;
-      }
+      while (i < lines.length && /^\|/.test(lines[i])) { tableLines.push(lines[i]); i++; }
       const rows = tableLines.filter(l => !/^\|[-:| ]+\|$/.test(l.trim()));
       if (rows.length > 0) {
         const parseRow = (r) => r.split("|").filter((_, idx, arr) => idx > 0 && idx < arr.length - 1).map(c => c.trim());
@@ -102,9 +91,7 @@ function renderMarkdown(md, onCheckboxToggle) {
               <thead>
                 <tr style={{ background: "#f5f6f8" }}>
                   {headers.map((h, j) => (
-                    <th key={j} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, color: "#333", borderBottom: "2px solid #e0e0e0", whiteSpace: "nowrap" }}>
-                      {inlineFormat(h)}
-                    </th>
+                    <th key={j} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, color: "#333", borderBottom: "2px solid #e0e0e0", whiteSpace: "nowrap" }}>{inlineFormat(h)}</th>
                   ))}
                 </tr>
               </thead>
@@ -112,9 +99,7 @@ function renderMarkdown(md, onCheckboxToggle) {
                 {body.map((row, ri) => (
                   <tr key={ri} style={{ borderBottom: "1px solid #f0f0f0", background: ri % 2 === 0 ? "#fff" : "#fafafa" }}>
                     {parseRow(row).map((cell, ci) => (
-                      <td key={ci} style={{ padding: "7px 12px", color: "#444", verticalAlign: "top" }}>
-                        {inlineFormat(cell)}
-                      </td>
+                      <td key={ci} style={{ padding: "7px 12px", color: "#444", verticalAlign: "top" }}>{inlineFormat(cell)}</td>
                     ))}
                   </tr>
                 ))}
@@ -126,20 +111,18 @@ function renderMarkdown(md, onCheckboxToggle) {
       continue;
     }
 
-    // Checkbox list item
     if (/^- \[[ x]\]/.test(line)) {
       const checkItems = [];
       while (i < lines.length && /^- \[[ x]\]/.test(lines[i])) {
         const checked = /^- \[x\]/.test(lines[i]);
         const text    = lines[i].replace(/^- \[[ x]\] /, "");
-        const lineIdx = i;
-        checkItems.push({ checked, text, lineIdx });
+        checkItems.push({ checked, text, lineIdx: i });
         i++;
       }
       elements.push(
         <div key={nextKey()} style={{ margin: "8px 0", display: "flex", flexDirection: "column", gap: 5 }}>
           {checkItems.map((item, j) => (
-            <label key={j} style={{ display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer", padding: "5px 8px", borderRadius: 6, background: item.checked ? "#00AA4408" : "transparent", transition: "background 0.1s" }}>
+            <label key={j} style={{ display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer", padding: "5px 8px", borderRadius: 6, background: item.checked ? "#00AA4408" : "transparent" }}>
               <input type="checkbox" defaultChecked={item.checked} onChange={e => onCheckboxToggle && onCheckboxToggle(item.lineIdx, e.target.checked)}
                 style={{ marginTop: 2, accentColor: "#00AA44", width: 14, height: 14, cursor: "pointer", flexShrink: 0 }} />
               <span style={{ fontSize: 13, color: item.checked ? "#aaa" : "#333", textDecoration: item.checked ? "line-through" : "none", lineHeight: 1.6 }}>
@@ -152,52 +135,32 @@ function renderMarkdown(md, onCheckboxToggle) {
       continue;
     }
 
-    // Bullet list
     if (/^[-*] /.test(line)) {
       const items = [];
-      while (i < lines.length && /^[-*] /.test(lines[i])) {
-        items.push(lines[i].replace(/^[-*] /, ""));
-        i++;
-      }
+      while (i < lines.length && /^[-*] /.test(lines[i])) { items.push(lines[i].replace(/^[-*] /, "")); i++; }
       elements.push(
-        <ul key={nextKey()} style={{ margin: "6px 0 6px 0", padding: "0 0 0 20px", display: "flex", flexDirection: "column", gap: 4 }}>
-          {items.map((item, j) => (
-            <li key={j} style={{ fontSize: 13, color: "#444", lineHeight: 1.7 }}>
-              {inlineFormat(item)}
-            </li>
-          ))}
+        <ul key={nextKey()} style={{ margin: "6px 0", padding: "0 0 0 20px", display: "flex", flexDirection: "column", gap: 4 }}>
+          {items.map((item, j) => <li key={j} style={{ fontSize: 13, color: "#444", lineHeight: 1.7 }}>{inlineFormat(item)}</li>)}
         </ul>
       );
       continue;
     }
 
-    // Numbered list
     if (/^\d+\. /.test(line)) {
       const items = [];
-      while (i < lines.length && /^\d+\. /.test(lines[i])) {
-        items.push(lines[i].replace(/^\d+\. /, ""));
-        i++;
-      }
+      while (i < lines.length && /^\d+\. /.test(lines[i])) { items.push(lines[i].replace(/^\d+\. /, "")); i++; }
       elements.push(
-        <ol key={nextKey()} style={{ margin: "6px 0 6px 0", padding: "0 0 0 20px", display: "flex", flexDirection: "column", gap: 4 }}>
-          {items.map((item, j) => (
-            <li key={j} style={{ fontSize: 13, color: "#444", lineHeight: 1.7 }}>
-              {inlineFormat(item)}
-            </li>
-          ))}
+        <ol key={nextKey()} style={{ margin: "6px 0", padding: "0 0 0 20px", display: "flex", flexDirection: "column", gap: 4 }}>
+          {items.map((item, j) => <li key={j} style={{ fontSize: 13, color: "#444", lineHeight: 1.7 }}>{inlineFormat(item)}</li>)}
         </ol>
       );
       continue;
     }
 
-    // Code block
     if (/^```/.test(line)) {
       const codeLines = [];
       i++;
-      while (i < lines.length && !/^```/.test(lines[i])) {
-        codeLines.push(lines[i]);
-        i++;
-      }
+      while (i < lines.length && !/^```/.test(lines[i])) { codeLines.push(lines[i]); i++; }
       i++;
       elements.push(
         <pre key={nextKey()} style={{ background: "#1a1a2a", color: "#e8e8e8", padding: "14px 18px", borderRadius: 8, fontSize: 12, fontFamily: "monospace", overflow: "auto", margin: "10px 0", lineHeight: 1.7 }}>
@@ -207,13 +170,9 @@ function renderMarkdown(md, onCheckboxToggle) {
       continue;
     }
 
-    // Blockquote
     if (/^> /.test(line)) {
       const qLines = [];
-      while (i < lines.length && /^> /.test(lines[i])) {
-        qLines.push(lines[i].replace(/^> /, ""));
-        i++;
-      }
+      while (i < lines.length && /^> /.test(lines[i])) { qLines.push(lines[i].replace(/^> /, "")); i++; }
       elements.push(
         <blockquote key={nextKey()} style={{ borderLeft: "4px solid #0066FF", margin: "10px 0", padding: "8px 16px", background: "#0066FF06", borderRadius: "0 8px 8px 0" }}>
           {qLines.map((l, j) => <p key={j} style={{ margin: 0, fontSize: 13, color: "#555", fontStyle: "italic", lineHeight: 1.7 }}>{inlineFormat(l)}</p>)}
@@ -222,25 +181,16 @@ function renderMarkdown(md, onCheckboxToggle) {
       continue;
     }
 
-    // Empty line
-    if (!line.trim()) {
-      elements.push(<div key={nextKey()} style={{ height: 6 }} />);
-      i++; continue;
-    }
+    if (!line.trim()) { elements.push(<div key={nextKey()} style={{ height: 6 }} />); i++; continue; }
 
-    // Paragraph
-    elements.push(
-      <p key={nextKey()} style={{ margin: "2px 0", fontSize: 13, color: "#444", lineHeight: 1.8 }}>
-        {inlineFormat(line)}
-      </p>
-    );
+    elements.push(<p key={nextKey()} style={{ margin: "2px 0", fontSize: 13, color: "#444", lineHeight: 1.8 }}>{inlineFormat(line)}</p>);
     i++;
   }
 
   return elements;
 }
 
-// ── Doc viewer with inline editing ────────────────────────────────────────────
+// ── Doc viewer ────────────────────────────────────────────────────────────────
 
 function DocViewer({ doc, onSave, onDelete, onNew }) {
   const [editMode, setEditMode]   = useState(false);
@@ -264,9 +214,7 @@ function DocViewer({ doc, onSave, onDelete, onNew }) {
   const handleCheckboxToggle = useCallback((lineIdx, checked) => {
     setContent(prev => {
       const lines = prev.split("\n");
-      if (lines[lineIdx]) {
-        lines[lineIdx] = lines[lineIdx].replace(/^(- \[)[ x](\])/, `$1${checked ? "x" : " "}$2`);
-      }
+      if (lines[lineIdx]) lines[lineIdx] = lines[lineIdx].replace(/^(- \[)[ x](\])/, `$1${checked ? "x" : " "}$2`);
       return lines.join("\n");
     });
   }, []);
@@ -274,7 +222,7 @@ function DocViewer({ doc, onSave, onDelete, onNew }) {
   const handleExportDocx = async () => {
     setExporting(true);
     try {
-      const res = await fetch(API + "/docs/" + doc.id + "/export-docx", { method: "POST" });
+      const res = await apiFetch("/docs/" + doc.id + "/export-docx", { method: "POST" });
       if (!res.ok) throw new Error("Export failed");
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
@@ -292,26 +240,18 @@ function DocViewer({ doc, onSave, onDelete, onNew }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#fff" }}>
-
-      {/* Doc toolbar */}
       <div style={{ padding: "12px 28px", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 10, background: "#fafafa", flexShrink: 0 }}>
         {editMode ? (
-          <input
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#1a1a2a", border: "1.5px solid #0066FF", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", outline: "none" }}
-          />
+          <input value={title} onChange={e => setTitle(e.target.value)}
+            style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#1a1a2a", border: "1.5px solid #0066FF", borderRadius: 6, padding: "4px 10px", fontFamily: "inherit", outline: "none" }} />
         ) : (
           <div style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#1a1a2a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
         )}
-
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
           {editMode ? (
             <>
               <button onClick={() => { setTitle(doc.title); setContent(doc.content); setEditMode(false); }}
-                style={{ padding: "5px 12px", borderRadius: 6, fontSize: 12, background: "#f5f6f8", border: "1px solid #e0e0e0", color: "#888", cursor: "pointer" }}>
-                Cancel
-              </button>
+                style={{ padding: "5px 12px", borderRadius: 6, fontSize: 12, background: "#f5f6f8", border: "1px solid #e0e0e0", color: "#888", cursor: "pointer" }}>Cancel</button>
               <button onClick={handleSave} disabled={saving}
                 style={{ padding: "5px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, background: saving ? "#ccc" : "#0066FF", border: "none", color: "#fff", cursor: saving ? "not-allowed" : "pointer" }}>
                 {saving ? "Saving..." : "Save"}
@@ -321,36 +261,25 @@ function DocViewer({ doc, onSave, onDelete, onNew }) {
             <>
               {saved && <span style={{ fontSize: 11, color: "#00AA44", fontFamily: "monospace" }}>Saved</span>}
               <button onClick={() => setEditMode(true)}
-                style={{ padding: "5px 12px", borderRadius: 6, fontSize: 12, background: "#f5f6f8", border: "1px solid #e0e0e0", color: "#555", cursor: "pointer" }}>
-                Edit
-              </button>
+                style={{ padding: "5px 12px", borderRadius: 6, fontSize: 12, background: "#f5f6f8", border: "1px solid #e0e0e0", color: "#555", cursor: "pointer" }}>Edit</button>
               <button onClick={handleExportDocx} disabled={exporting}
-                style={{ padding: "5px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: "#1a1a2a", border: "none", color: "#fff", cursor: exporting ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 5 }}>
+                style={{ padding: "5px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: "#1a1a2a", border: "none", color: "#fff", cursor: exporting ? "not-allowed" : "pointer" }}>
                 {exporting ? "Exporting..." : "⬇ Download .docx"}
               </button>
               <button onClick={() => { if (confirm("Delete this doc?")) onDelete(doc.id); }}
-                style={{ padding: "5px 10px", borderRadius: 6, fontSize: 12, background: "none", border: "1px solid #FF444422", color: "#FF4444", cursor: "pointer" }}>
-                Delete
-              </button>
+                style={{ padding: "5px 10px", borderRadius: 6, fontSize: 12, background: "none", border: "1px solid #FF444422", color: "#FF4444", cursor: "pointer" }}>Delete</button>
             </>
           )}
         </div>
       </div>
-
-      {/* Doc body */}
       <div style={{ flex: 1, overflow: "auto" }}>
         {editMode ? (
-          <textarea
-            ref={textareaRef}
-            value={content}
-            onChange={e => setContent(e.target.value)}
-            style={{ width: "100%", height: "100%", padding: "32px 48px", fontSize: 13, fontFamily: "monospace", color: "#333", lineHeight: 1.8, border: "none", outline: "none", resize: "none", boxSizing: "border-box", background: "#fff" }}
-          />
+          <textarea ref={textareaRef} value={content} onChange={e => setContent(e.target.value)}
+            style={{ width: "100%", height: "100%", padding: "32px 48px", fontSize: 13, fontFamily: "monospace", color: "#333", lineHeight: 1.8, border: "none", outline: "none", resize: "none", boxSizing: "border-box", background: "#fff" }} />
         ) : (
           <div style={{ maxWidth: 780, margin: "0 auto", padding: "32px 48px" }}>
             {renderMarkdown(content, (lineIdx, checked) => {
               handleCheckboxToggle(lineIdx, checked);
-              // Auto-save checkbox state
               const updated = content.split("\n");
               if (updated[lineIdx]) {
                 updated[lineIdx] = updated[lineIdx].replace(/^(- \[)[ x](\])/, `$1${checked ? "x" : " "}$2`);
@@ -370,69 +299,45 @@ function PromptInput({ onGenerate, generating, activeProject, activeFeature }) {
   const [prompt, setPrompt] = useState("");
   const textareaRef         = useRef(null);
 
-  const submit = () => {
-    if (!prompt.trim() || generating) return;
-    onGenerate(prompt.trim());
-    setPrompt("");
-  };
-
-  const useStarter = (p) => {
-    setPrompt(p);
-    textareaRef.current?.focus();
-  };
+  const submit = () => { if (!prompt.trim() || generating) return; onGenerate(prompt.trim()); setPrompt(""); };
+  const useStarter = (p) => { setPrompt(p); textareaRef.current?.focus(); };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f5f6f8" }}>
-
-      {/* Header */}
       <div style={{ padding: "32px 48px 0", maxWidth: 780, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
-        <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2a", marginBottom: 6 }}>
-          New Document
-        </div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2a", marginBottom: 6 }}>New Document</div>
         <div style={{ fontSize: 13, color: "#aaa", marginBottom: 28 }}>
           {activeProject
             ? <>Context loaded from <strong style={{ color: "#0066FF" }}>{activeProject.name}</strong>{activeFeature ? <> / <strong style={{ color: "#00AA44" }}>{activeFeature.name}</strong></> : ""}</>
             : "Select a project to include its context in the document"}
         </div>
-
-        {/* Prompt box */}
-        <div style={{ background: "#fff", border: "1.5px solid #e0e0e0", borderRadius: 14, overflow: "hidden", boxShadow: "0 4px 20px rgba(0,0,0,0.06)", transition: "border-color 0.15s" }}
+        <div style={{ background: "#fff", border: "1.5px solid #e0e0e0", borderRadius: 14, overflow: "hidden", boxShadow: "0 4px 20px rgba(0,0,0,0.06)" }}
           onFocusCapture={e => e.currentTarget.style.borderColor = "#0066FF"}
           onBlurCapture={e => e.currentTarget.style.borderColor = "#e0e0e0"}>
-          <textarea
-            ref={textareaRef}
-            value={prompt}
-            onChange={e => setPrompt(e.target.value)}
+          <textarea ref={textareaRef} value={prompt} onChange={e => setPrompt(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(); }}
-            placeholder="Describe the document you want to create..."
-            rows={4}
-            style={{ width: "100%", padding: "18px 20px", fontSize: 14, fontFamily: "inherit", color: "#1a1a2a", lineHeight: 1.7, border: "none", outline: "none", resize: "none", boxSizing: "border-box", background: "transparent" }}
-          />
+            placeholder="Describe the document you want to create..." rows={4}
+            style={{ width: "100%", padding: "18px 20px", fontSize: 14, fontFamily: "inherit", color: "#1a1a2a", lineHeight: 1.7, border: "none", outline: "none", resize: "none", boxSizing: "border-box", background: "transparent" }} />
           <div style={{ padding: "10px 16px", borderTop: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fafafa" }}>
             <span style={{ fontSize: 11, color: "#ccc" }}>⌘ + Enter to generate</span>
             <button onClick={submit} disabled={!prompt.trim() || generating || !activeProject}
-              style={{ padding: "8px 22px", background: !prompt.trim() || generating || !activeProject ? "#e8e8e8" : "linear-gradient(135deg, #0044cccc, #0066FF)", border: "none", borderRadius: 8, color: !prompt.trim() || generating || !activeProject ? "#aaa" : "#fff", fontSize: 13, fontWeight: 700, cursor: !prompt.trim() || generating || !activeProject ? "not-allowed" : "pointer", transition: "all 0.15s" }}>
+              style={{ padding: "8px 22px", background: !prompt.trim() || generating || !activeProject ? "#e8e8e8" : "linear-gradient(135deg, #0044cccc, #0066FF)", border: "none", borderRadius: 8, color: !prompt.trim() || generating || !activeProject ? "#aaa" : "#fff", fontSize: 13, fontWeight: 700, cursor: !prompt.trim() || generating || !activeProject ? "not-allowed" : "pointer" }}>
               {generating ? "Generating..." : "Generate Doc ↗"}
             </button>
           </div>
         </div>
-
         {!activeProject && (
           <div style={{ marginTop: 10, padding: "9px 14px", background: "#FF880008", border: "1px solid #FF880022", borderRadius: 8, fontSize: 12, color: "#FF8800" }}>
             Select a project from the sidebar first — the doc will be grounded in your project context.
           </div>
         )}
       </div>
-
-      {/* Starter prompts */}
       <div style={{ padding: "28px 48px", maxWidth: 780, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
-        <div style={{ fontSize: 11, color: "#bbb", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600, marginBottom: 14 }}>
-          Start with a template
-        </div>
+        <div style={{ fontSize: 11, color: "#bbb", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 600, marginBottom: 14 }}>Start with a template</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           {STARTER_PROMPTS.map((s, i) => (
             <button key={i} onClick={() => useStarter(s.prompt)}
-              style={{ padding: "12px 14px", background: "#fff", border: "1px solid #e8e8e8", borderRadius: 10, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "flex-start", gap: 10, transition: "all 0.12s", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}
+              style={{ padding: "12px 14px", background: "#fff", border: "1px solid #e8e8e8", borderRadius: 10, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "flex-start", gap: 10, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = "#0066FF44"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,102,255,0.1)"; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = "#e8e8e8"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; }}>
               <span style={{ fontSize: 20, flexShrink: 0 }}>{s.icon}</span>
@@ -471,20 +376,19 @@ function GeneratingView({ prompt }) {
 export default function Docs({ ps }) {
   const { activeProject, activeFeature } = ps;
 
-  const [docs, setDocs]               = useState([]);
-  const [activeDoc, setActiveDoc]     = useState(null);
-  const [generating, setGenerating]   = useState(false);
+  const [docs, setDocs]                         = useState([]);
+  const [activeDoc, setActiveDoc]               = useState(null);
+  const [generating, setGenerating]             = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState("");
-  const [view, setView]               = useState("new"); // "new" | "doc"
-  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [view, setView]                         = useState("new");
+  const [loadingDocs, setLoadingDocs]           = useState(false);
 
-  // Load docs when project changes
   useEffect(() => {
     if (!activeProject) { setDocs([]); setActiveDoc(null); setView("new"); return; }
     setLoadingDocs(true);
-    fetch(API + "/projects/" + activeProject.id + "/docs")
+    apiFetch("/projects/" + activeProject.id + "/docs")
       .then(r => r.json())
-      .then(data => { setDocs(data); })
+      .then(data => setDocs(data))
       .catch(console.error)
       .finally(() => setLoadingDocs(false));
   }, [activeProject?.id]);
@@ -495,9 +399,8 @@ export default function Docs({ ps }) {
     setGeneratingPrompt(prompt);
     setView("generating");
     try {
-      const res = await fetch(API + "/projects/" + activeProject.id + "/docs/generate", {
+      const res = await apiFetch("/projects/" + activeProject.id + "/docs/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, featureId: activeFeature?.id }),
       });
       const doc = await res.json();
@@ -515,17 +418,15 @@ export default function Docs({ ps }) {
   };
 
   const handleOpenDoc = async (docPreview) => {
-    // Fetch full content
-    const res = await fetch(API + "/docs/" + docPreview.id);
+    const res = await apiFetch("/docs/" + docPreview.id);
     const doc = await res.json();
     setActiveDoc(doc);
     setView("doc");
   };
 
   const handleSave = async (id, title, content) => {
-    await fetch(API + "/docs/" + id, {
+    await apiFetch("/docs/" + id, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title, content }),
     });
     setDocs(prev => prev.map(d => d.id === id ? { ...d, title } : d));
@@ -533,7 +434,7 @@ export default function Docs({ ps }) {
   };
 
   const handleDelete = async (id) => {
-    await fetch(API + "/docs/" + id, { method: "DELETE" });
+    await apiFetch("/docs/" + id, { method: "DELETE" });
     setDocs(prev => prev.filter(d => d.id !== id));
     setActiveDoc(null);
     setView("new");
@@ -549,74 +450,33 @@ export default function Docs({ ps }) {
 
   return (
     <div style={{ display: "flex", height: "calc(100vh - 48px)", overflow: "hidden", background: "#f5f6f8" }}>
-
-      {/* Left panel: doc list */}
       <div style={{ width: 240, background: "#fff", borderRight: "1px solid #f0f0f0", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #f5f5f5", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1a2a" }}>Documents</div>
           <button onClick={() => { setActiveDoc(null); setView("new"); }}
-            style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, background: "#0066FF", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer" }}>
-            + New
-          </button>
+            style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, background: "#0066FF", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer" }}>+ New</button>
         </div>
-
         <div style={{ flex: 1, overflowY: "auto", padding: "8px" }}>
-          {!activeProject && (
-            <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: "20px 12px", lineHeight: 1.7 }}>
-              Select a project to see its documents
-            </div>
-          )}
-          {activeProject && loadingDocs && (
-            <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: 20 }}>Loading...</div>
-          )}
-          {activeProject && !loadingDocs && docs.length === 0 && (
-            <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: "20px 12px", lineHeight: 1.7, fontStyle: "italic" }}>
-              No documents yet. Generate your first one.
-            </div>
-          )}
+          {!activeProject && <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: "20px 12px", lineHeight: 1.7 }}>Select a project to see its documents</div>}
+          {activeProject && loadingDocs && <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: 20 }}>Loading...</div>}
+          {activeProject && !loadingDocs && docs.length === 0 && <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: "20px 12px", lineHeight: 1.7, fontStyle: "italic" }}>No documents yet. Generate your first one.</div>}
           {docs.map(doc => (
-            <div key={doc.id}
-              onClick={() => handleOpenDoc(doc)}
-              style={{ padding: "10px 12px", borderRadius: 8, marginBottom: 2, cursor: "pointer", background: activeDoc?.id === doc.id ? "#0066FF0d" : "transparent", border: `1px solid ${activeDoc?.id === doc.id ? "#0066FF22" : "transparent"}`, transition: "all 0.1s" }}
+            <div key={doc.id} onClick={() => handleOpenDoc(doc)}
+              style={{ padding: "10px 12px", borderRadius: 8, marginBottom: 2, cursor: "pointer", background: activeDoc?.id === doc.id ? "#0066FF0d" : "transparent", border: `1px solid ${activeDoc?.id === doc.id ? "#0066FF22" : "transparent"}` }}
               onMouseEnter={e => { if (activeDoc?.id !== doc.id) e.currentTarget.style.background = "#f5f6f8"; }}
               onMouseLeave={e => { if (activeDoc?.id !== doc.id) e.currentTarget.style.background = "transparent"; }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: activeDoc?.id === doc.id ? "#0066FF" : "#1a1a2a", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                📄 {doc.title}
-              </div>
-              {doc.preview && (
-                <div style={{ fontSize: 11, color: "#aaa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.5 }}>
-                  {doc.preview.replace(/[#*`>]/g, "").trim().slice(0, 60)}
-                </div>
-              )}
-              <div style={{ fontSize: 10, color: "#ccc", marginTop: 3, fontFamily: "monospace" }}>
-                {timeAgo(doc.updated_at)}
-              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: activeDoc?.id === doc.id ? "#0066FF" : "#1a1a2a", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📄 {doc.title}</div>
+              {doc.preview && <div style={{ fontSize: 11, color: "#aaa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.preview.replace(/[#*`>]/g, "").trim().slice(0, 60)}</div>}
+              <div style={{ fontSize: 10, color: "#ccc", marginTop: 3, fontFamily: "monospace" }}>{timeAgo(doc.updated_at)}</div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Right panel: content */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        {view === "new" && (
-          <div style={{ flex: 1, overflow: "auto" }}>
-            <PromptInput
-              onGenerate={handleGenerate}
-              generating={generating}
-              activeProject={activeProject}
-              activeFeature={activeFeature}
-            />
-          </div>
-        )}
+        {view === "new"        && <div style={{ flex: 1, overflow: "auto" }}><PromptInput onGenerate={handleGenerate} generating={generating} activeProject={activeProject} activeFeature={activeFeature} /></div>}
         {view === "generating" && <GeneratingView prompt={generatingPrompt} />}
-        {view === "doc" && activeDoc && (
-          <DocViewer
-            doc={activeDoc}
-            onSave={handleSave}
-            onDelete={handleDelete}
-            onNew={() => { setActiveDoc(null); setView("new"); }}
-          />
-        )}
+        {view === "doc"        && activeDoc && <DocViewer doc={activeDoc} onSave={handleSave} onDelete={handleDelete} onNew={() => { setActiveDoc(null); setView("new"); }} />}
       </div>
     </div>
   );

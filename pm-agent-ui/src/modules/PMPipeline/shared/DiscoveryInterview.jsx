@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { API } from "../constants.js";
+import { apiFetch, API } from "../../../lib/api";  // adjust path depth
 
 export default function DiscoveryInterviewModal({ project, onClose, onComplete }) {
   const [questions,  setQuestions]  = useState(null);
@@ -8,7 +8,7 @@ export default function DiscoveryInterviewModal({ project, onClose, onComplete }
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetch(API + "/projects/" + project.id + "/discovery-interview", { method: "POST" })
+    apiFetch( "/projects/" + project.id + "/discovery-interview", { method: "POST" })
       .then(r => r.json())
       .then(d => { setQuestions(d.questions || []); setLoading(false); })
       .catch(() => { setLoading(false); onClose(); });
@@ -21,7 +21,7 @@ export default function DiscoveryInterviewModal({ project, onClose, onComplete }
       `Q: ${q}\nA: ${answers[i] || "(skipped)"}`
     ).join("\n\n");
     const brief = `Discovery Interview Answers:\n\n${answersText}`;
-    await fetch(API + "/projects/" + project.id, {
+    await apiFetch("/projects/" + project.id, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: project.name, description: brief }),

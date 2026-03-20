@@ -2,7 +2,7 @@
 // Discovery interview question generation and answer submission logic.
 
 import { useState, useEffect } from "react";
-import { API } from "../constants.js";
+import { apiFetch, API } from "../../../lib/api";  // adjust path depth
 
 export function useDiscoveryInterview(project) {
   const [questions,  setQuestions]  = useState(null);
@@ -15,7 +15,7 @@ export function useDiscoveryInterview(project) {
     if (!project?.id) return;
     setLoading(true);
     setError(null);
-    fetch(API + "/projects/" + project.id + "/discovery-interview", { method: "POST" })
+    apiFetch("/projects/" + project.id + "/discovery-interview", { method: "POST" })
       .then(r => r.json())
       .then(d => {
         if (d.error) throw new Error(d.error);
@@ -36,7 +36,7 @@ export function useDiscoveryInterview(project) {
       .join("\n\n");
     const brief = `Discovery Interview Answers:\n\n${answersText}`;
 
-    await fetch(API + "/projects/" + project.id, {
+    await apiFetch("/projects/" + project.id, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: project.name, description: brief }),

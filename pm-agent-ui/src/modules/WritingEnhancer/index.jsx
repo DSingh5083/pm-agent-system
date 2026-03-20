@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { callClaude } from "../../lib/claude.js";
-const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
+import { apiFetch } from "../../../lib/api";
 import { SectionLabel, EmptyState, CopyButton, PillToggle } from "../../components/ui.jsx";
 
 // ── Enhance Writing Config ────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ VARIATION 2: [Short label]
 VARIATION 3: [Short label]
 [text]`;
 
-      const geminiRes = await fetch(API + "/enhance-gemini", {
+      const geminiRes = await apiFetch("/enhance-gemini", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: geminiPrompt, maxTokens: 3000 }),
@@ -336,7 +336,7 @@ Write a clear, targeted message for this stakeholder. Focus only on what matters
 Do not include a subject line or greeting — just the message body.
 Keep it concise and specific to their perspective.`;
 
-      const sRes  = await fetch(API + "/enhance-gemini", {
+      const sRes  = await apiFetch( "/enhance-gemini", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: stakeholderPrompt, maxTokens: 1500 }),

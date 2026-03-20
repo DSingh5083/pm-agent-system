@@ -3,7 +3,7 @@
 // Each story is an expandable card with 4 editable sections.
 
 import { useState } from "react";
-import { API } from "../PMPipeline/constants.js";
+import { apiFetch, API } from "../../../lib/api";  // adjust path depth
 
 // Safely convert any value to a renderable string
 function safeStr(val) {
@@ -220,7 +220,7 @@ export default function CodeReadyStories({ featureId, featureName, hasPrd, initi
     setGenerating(true);
     setError(null);
     try {
-      const res  = await fetch(API + "/features/" + featureId + "/code-stories", { method: "POST" });
+      const res  = await apiFetch("/features/" + featureId + "/code-stories", { method: "POST" });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setStories(data.stories);
@@ -236,7 +236,7 @@ export default function CodeReadyStories({ featureId, featureName, hasPrd, initi
     const next = stories.map((s, i) => i === index ? updated : s);
     setStories(next);
     setSaving(true);
-    await fetch(API + "/features/" + featureId + "/code-stories/save", {
+    await apiFetch( "/features/" + featureId + "/code-stories/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ stories: next }),

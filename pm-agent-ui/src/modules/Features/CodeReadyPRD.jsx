@@ -4,7 +4,7 @@
 // Editable inline, downloadable as .md.
 
 import { useState, useRef } from "react";
-import { API } from "../PMPipeline/constants.js";
+import { apiFetch, API } from "../../../lib/api";  // adjust path depth
 
 // ── Screenshot uploader ───────────────────────────────────────────────────────
 
@@ -168,7 +168,7 @@ export default function CodeReadyPRD({ featureId, featureName, hasPrd, initialCo
       const phaseTimer1 = setTimeout(() => setPhase("synthesis"), 25000);
       const phaseTimer2 = setTimeout(() => setPhase("validation"), 45000);
 
-      const res  = await fetch(API + "/features/" + featureId + "/code-ready-prd", {
+      const res  = await apiFetch( "/features/" + featureId + "/code-ready-prd", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -202,7 +202,7 @@ export default function CodeReadyPRD({ featureId, featureName, hasPrd, initialCo
     setContent(updated);
     setRawDraft(updated);
     setSaving(true);
-    await fetch(API + "/features/" + featureId + "/code-ready-prd/save", {
+    await apiFetch("/features/" + featureId + "/code-ready-prd/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: updated }),
@@ -215,7 +215,7 @@ export default function CodeReadyPRD({ featureId, featureName, hasPrd, initialCo
   const saveRaw = async () => {
     setContent(rawDraft);
     setSaving(true);
-    await fetch(API + "/features/" + featureId + "/code-ready-prd/save", {
+    await apiFetch("/features/" + featureId + "/code-ready-prd/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: rawDraft }),

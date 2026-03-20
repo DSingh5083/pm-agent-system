@@ -4,7 +4,7 @@
 
 import { useState, useRef, useEffect } from "react";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
+import { apiFetch, API } from "../../../lib/api";  // adjust path depth
 
 const STARTERS = [
   { icon: "📄", label: "Review my PRD",              prompt: "Review my PRD and tell me what's missing, unclear, or needs strengthening. Be specific." },
@@ -172,7 +172,7 @@ export default function PMChat({ ps }) {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API}/chat`, {
+      const res = await apiFetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

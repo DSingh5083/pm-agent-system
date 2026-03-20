@@ -3,7 +3,7 @@
 // No JSX — pure logic hook.
 
 import { useState } from "react";
-import { API } from "../constants.js";
+import { apiFetch, API } from "../../../lib/api";  // adjust path depth
 
 export function useSemanticSort({ onApprove }) {
   const [step,                 setStep]                 = useState("input");
@@ -20,7 +20,7 @@ export function useSemanticSort({ onApprove }) {
     setStep("sorting");
     setError(null);
     try {
-      const res  = await fetch(API + "/semantic-sort", {
+      const res  = await apiFetch("/semantic-sort", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ input: rawInput }),
@@ -41,7 +41,7 @@ export function useSemanticSort({ onApprove }) {
     if (!painText) return;
     setSearchStatus("Researching enhancements...");
     try {
-      const res  = await fetch(API + "/semantic-enhancements", {
+      const res  = await apiFetch("/semantic-enhancements", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ buckets: b }),
@@ -75,7 +75,7 @@ export function useSemanticSort({ onApprove }) {
     setStep("generating");
     setError(null);
     try {
-      const res  = await fetch(API + "/generate-brief", {
+      const res  = await apiFetch("/generate-brief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ buckets, enhancements, googleSearchInsights }),

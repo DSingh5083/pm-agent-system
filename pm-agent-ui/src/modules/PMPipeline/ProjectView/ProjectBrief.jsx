@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { API } from "../constants.js";
+import { apiFetch, API } from "../../../lib/api";  // adjust path depth
 import SemanticSortModal from "../shared/SemanticSort.jsx";
 
 
@@ -44,7 +44,7 @@ useEffect(() => {
     if (!draft.trim() || improving) return;
     setImproving(true);
     try {
-      const res = await fetch(API + "/improve-brief", {
+      const res = await apiFetch( "/improve-brief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ brief: draft }),

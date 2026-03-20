@@ -3,8 +3,7 @@
 // Content rendering delegated to renderers.jsx.
 
 import { useState, useEffect } from "react";
-const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
-import InterviewModal from "../shared/InterviewModal.jsx";
+import { apiFetch, API } from "../../../lib/api";  // adjust path depthimport InterviewModal from "../shared/InterviewModal.jsx";
 import { SectionedText, TicketList, MermaidDiagram } from "./renderers.jsx";
 
 // ── Copy button ───────────────────────────────────────────────────────────────
@@ -30,7 +29,7 @@ function NotionPushBtn({ stage, result, projectName, featureName }) {
   const push = async () => {
     setStatus("pushing");
     try {
-      const res  = await fetch(API + "/notion/push", {
+      const res  = await apiFetch("/notion/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

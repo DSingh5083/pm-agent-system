@@ -1,14 +1,14 @@
 import { useState, useEffect } from "react";
-import { API } from "../constants.js";
+import { apiFetch } from "../../../lib/api";
 
 export default function InterviewModal({ stage, interviewEndpoint, runEndpoint, onComplete, onCancel }) {
-  const [phase, setPhase]       = useState("loading"); // loading | questions | running | distilling
+  const [phase,     setPhase]     = useState("loading"); // loading | questions | running | distilling
   const [questions, setQuestions] = useState([]);
-  const [answers, setAnswers]   = useState({});
-  const [error, setError]       = useState(null);
+  const [answers,   setAnswers]   = useState({});
+  const [error,     setError]     = useState(null);
 
   useEffect(() => {
-    fetch(interviewEndpoint, { method: "POST", headers: { "Content-Type": "application/json" } })
+    apiFetch(interviewEndpoint, { method: "POST" })
       .then(r => r.json())
       .then(data => {
         if (data.error) throw new Error(data.error);
@@ -36,9 +36,8 @@ export default function InterviewModal({ stage, interviewEndpoint, runEndpoint, 
     try {
       setPhase("running");
       const body = interviewAnswers ? { interviewAnswers } : {};
-      const res  = await fetch(runEndpoint, {
+      const res  = await apiFetch(runEndpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       const data = await res.json();
@@ -59,7 +58,9 @@ export default function InterviewModal({ stage, interviewEndpoint, runEndpoint, 
         {/* Header */}
         <div style={{ padding: "18px 24px 14px", borderBottom: "1px solid #f0f0f0", background: stage.color + "06" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 38, height: 38, borderRadius: "50%", background: stage.color + "18", border: "1.5px solid " + stage.color + "44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{stage.icon}</div>
+            <div style={{ width: 38, height: 38, borderRadius: "50%", background: stage.color + "18", border: "1.5px solid " + stage.color + "44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+              {stage.icon}
+            </div>
             <div>
               <div style={{ fontSize: 15, fontWeight: 800, color: "#1a1a2a" }}>Before generating {stage.label}</div>
               <div style={{ fontSize: 11, color: "#aaa", marginTop: 1 }}>Answer these to get specific, not generic, output</div>
@@ -94,7 +95,9 @@ export default function InterviewModal({ stage, interviewEndpoint, runEndpoint, 
               {questions.map((q, i) => (
                 <div key={i} style={{ marginBottom: 18 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a2a", marginBottom: 7, display: "flex", gap: 8, alignItems: "flex-start" }}>
-                    <span style={{ flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: stage.color + "18", border: "1px solid " + stage.color + "44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: stage.color, marginTop: 1 }}>{i + 1}</span>
+                    <span style={{ flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: stage.color + "18", border: "1px solid " + stage.color + "44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, color: stage.color, marginTop: 1 }}>
+                      {i + 1}
+                    </span>
                     <span>{q}</span>
                   </div>
                   <textarea
@@ -131,13 +134,17 @@ export default function InterviewModal({ stage, interviewEndpoint, runEndpoint, 
         {phase === "questions" && (
           <div style={{ padding: "14px 24px", borderTop: "1px solid #f0f0f0", display: "flex", gap: 8, alignItems: "center" }}>
             <div style={{ flex: 1, fontSize: 11, color: "#bbb" }}>
-              {answeredCount > 0 ? answeredCount + " of " + questions.length + " answered" : "All answers optional — skip to use context only"}
+              {answeredCount > 0
+                ? answeredCount + " of " + questions.length + " answered"
+                : "All answers optional — skip to use context only"}
             </div>
-            <button onClick={onCancel} style={{ padding: "7px 14px", background: "none", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 12, color: "#888", cursor: "pointer" }}>
+            <button onClick={onCancel}
+              style={{ padding: "7px 14px", background: "none", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 12, color: "#888", cursor: "pointer" }}>
               Cancel
             </button>
             {questions.length > 0 && (
-              <button onClick={() => handleSubmit(true)} style={{ padding: "7px 14px", background: "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 12, color: "#666", cursor: "pointer" }}>
+              <button onClick={() => handleSubmit(true)}
+                style={{ padding: "7px 14px", background: "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 12, color: "#666", cursor: "pointer" }}>
                 Skip questions
               </button>
             )}
@@ -151,4 +158,3 @@ export default function InterviewModal({ stage, interviewEndpoint, runEndpoint, 
     </div>
   );
 }
-

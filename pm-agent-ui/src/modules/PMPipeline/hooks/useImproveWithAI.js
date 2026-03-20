@@ -3,7 +3,7 @@
 // Returns state and handlers — no JSX.
 
 import { useState } from "react";
-import { API } from "../constants.js";
+import { apiFetch, API } from "../../../lib/api";  // adjust path depth
 
 export function useImproveWithAI() {
   const [improving, setImproving] = useState(false);
@@ -15,7 +15,7 @@ export function useImproveWithAI() {
     setImproving(true);
     setError(null);
     try {
-      const res  = await fetch(API + "/improve-brief", {
+      const res  = await apiFetch("/improve-brief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ brief: draft }),
