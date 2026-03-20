@@ -4,9 +4,7 @@ import dotenv from "dotenv";
 import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { createRequire } from "module";
-const _require = createRequire(import.meta.url);
-const { Client: NotionClient } = _require("@notionhq/client");
+import { Client as NotionClient } from "@notionhq/client";
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb } from "./db.js";
 dotenv.config();
 
