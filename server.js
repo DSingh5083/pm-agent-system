@@ -15,9 +15,6 @@ const geminiClient = process.env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
   : null;
 
-import { createRequire } from "module";
-const _require = createRequire(import.meta.url);
-const { Client: NotionClient } = _require("@notionhq/client");
 const notionClient = process.env.NOTION_API_KEY
   ? new NotionClient({ auth: process.env.NOTION_API_KEY })
   : null;
@@ -98,7 +95,7 @@ async function callGeminiWithFallback(prompt, maxOutputTokens = 6000) {
       // All retries exhausted — fall back to Claude
       if (isRateLimit) {
         console.warn("Gemini quota exhausted — falling back to Claude");
-        const response = await claudeClient.messages.create({
+        const response = await client.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: maxOutputTokens,
           messages: [{ role: "user", content: prompt }],
@@ -1201,7 +1198,7 @@ app.post("/features/:id/code-ready-prd", async (req, res) => {
     const messageContent = [];
 
     // Add screenshots as vision inputs
-    screenshots.forEach((img, i) => {
+    screenshots.forEach((img) => {
       messageContent.push({
         type: "image",
         source: {
@@ -1487,7 +1484,7 @@ ${systemContext}`;
 
   if (researchMatch) {
     try {
-      const searchQuery = researchMatch[1]?.trim() || activeProject?.name || lastUserMsg;
+      const searchQuery = researchMatch[1]?.trim() || lastUserMsg;
       const pseResults  = await googlePSESearch(searchQuery, { num: 5, dateRestrict: "m12" });
       if (pseResults.length) {
         const resultsBlock = pseResults.map((r, i) =>
