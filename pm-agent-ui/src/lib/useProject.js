@@ -2,10 +2,16 @@ import { useState, useEffect, useCallback } from "react";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
+const STORAGE_KEY = "pm_agent_auth";
+
 async function api(method, path, body) {
+  const pw = sessionStorage.getItem(STORAGE_KEY) || "";
   const res = await fetch(API + path, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(pw ? { "x-app-password": pw } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
