@@ -1535,3 +1535,12 @@ app.get("/debug/notion", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+app.get("/debug/notion-config", (req, res) => {
+  res.json({
+    hasApiKey: !!process.env.NOTION_API_KEY,
+    apiKeyLength: process.env.NOTION_API_KEY?.length || 0,
+    hasDatabaseId: !!process.env.NOTION_DATABASE_ID,
+    databaseId: process.env.NOTION_DATABASE_ID || "MISSING",
+    notionClientReady: !!notionClient,
+  });
+});
