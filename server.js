@@ -4,7 +4,6 @@ import dotenv from "dotenv";
 import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import * as notionPkg from "@notionhq/client";
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb } from "./db.js";
 import { runStage } from "./agents/stageRunner.js";
 import { getStage } from "./stageRegistry.js";
@@ -16,11 +15,11 @@ const geminiClient = process.env.GEMINI_API_KEY
   ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
   : null;
 
-const NotionClientClass = notionPkg.Client || notionPkg.default?.Client || notionPkg.default;
-console.log("Notion pkg keys:", Object.keys(notionPkg));
-console.log("Notion ClientClass:", typeof NotionClientClass);
-const notionClient = process.env.NOTION_API_KEY && NotionClientClass
-  ? new NotionClientClass({ auth: process.env.NOTION_API_KEY })
+import { createRequire } from "module";
+const _require = createRequire(import.meta.url);
+const { Client: NotionClient } = _require("@notionhq/client");
+const notionClient = process.env.NOTION_API_KEY
+  ? new NotionClient({ auth: process.env.NOTION_API_KEY })
   : null;
 
 const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID || "";
@@ -1518,12 +1517,13 @@ ${systemContext}`;
 
 // ── START ─────────────────────────────────────────────────────────────────────
 
-initDb().then(() => {
+Promise.all([initDb(), initNotion()]).then(() => {
   app.listen(3001, () => {
     console.log("PM Agent server running on http://localhost:3001");
     console.log("API Key:", process.env.ANTHROPIC_API_KEY ? "loaded" : "MISSING");
+    console.log("Notion:", notionClient ? "connected" : "not configured");
   });
 }).catch(err => {
-  console.error("Failed to init database:", err.message);
+  console.error("Failed to start server:", err.message);
   process.exit(1);
 });
