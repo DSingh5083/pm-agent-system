@@ -1522,3 +1522,16 @@ Promise.all([initDb()]).then(() => {
   console.error("Failed to start server:", err.message);
   process.exit(1);
 });
+app.get("/debug/notion", async (req, res) => {
+  try {
+    const mod = await import("@notionhq/client");
+    res.json({
+      keys: Object.keys(mod),
+      defaultKeys: mod.default ? Object.keys(mod.default) : null,
+      clientType: typeof mod.Client,
+      defaultType: typeof mod.default,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
