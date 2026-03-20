@@ -7,6 +7,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import pkg from "@notionhq/client";
 const { Client: NotionClient } = pkg;
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb } from "./db.js";
+import { embedStageOutput, embedProjectBrief, embedFeature, embedUIDescription, retrieveMemory } from "./embeddings.js";
 dotenv.config();
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -48,12 +49,10 @@ app.use(express.json({ limit: "10mb" }));
 
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
-// Simple password gate — set APP_PASSWORD in env to enable.
-// If not set, auth is disabled (local dev mode).
 
 function authMiddleware(req, res, next) {
   const password = process.env.APP_PASSWORD;
-  if (!password) return next(); // disabled
+  if (!password) return next();
   const token = req.headers["x-app-password"] || req.query.password;
   if (token === password) return next();
   res.status(401).json({ error: "Unauthorised — invalid password" });
@@ -61,8 +60,6 @@ function authMiddleware(req, res, next) {
 app.use(authMiddleware);
 
 // ── Gemini with retry + Claude fallback ───────────────────────────────────────
-// Retries up to 3 times with exponential backoff on 429/503.
-// Falls back to Claude if all retries exhausted.
 
 async function callGeminiWithFallback(prompt, maxOutputTokens = 6000) {
   if (!geminiClient) throw new Error("GEMINI_API_KEY not set");
@@ -72,7 +69,7 @@ async function callGeminiWithFallback(prompt, maxOutputTokens = 6000) {
     { apiVersion: "v1beta" }
   );
 
-  const delays = [1000, 3000, 7000]; // backoff: 1s, 3s, 7s
+  const delays = [1000, 3000, 7000];
 
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {
@@ -91,7 +88,6 @@ async function callGeminiWithFallback(prompt, maxOutputTokens = 6000) {
         continue;
       }
 
-      // All retries exhausted — fall back to Claude
       if (isRateLimit) {
         console.warn("Gemini quota exhausted — falling back to Claude");
         const response = await client.messages.create({
@@ -108,26 +104,21 @@ async function callGeminiWithFallback(prompt, maxOutputTokens = 6000) {
 }
 
 // ── Safe JSON parser ──────────────────────────────────────────────────────────
-// Multiple fallback strategies — never throws on valid-ish AI output.
 
 function safeParseJSON(text, fallbackArray = true) {
   if (!text) return fallbackArray ? [] : null;
 
-  // Strategy 1: direct parse
   try { return JSON.parse(text); } catch {}
 
-  // Strategy 2: strip markdown fences
   const stripped = text.replace(/```json\n?|```\n?/gi, "").trim();
   try { return JSON.parse(stripped); } catch {}
 
-  // Strategy 3: extract first [...] or {...} block
   const arrMatch = stripped.match(/\[([\s\S]*?)\]/);
   if (arrMatch) { try { return JSON.parse("[" + arrMatch[1] + "]"); } catch {} }
 
   const objMatch = stripped.match(/\{([\s\S]*?)\}/);
   if (objMatch) { try { return JSON.parse("{" + objMatch[1] + "}"); } catch {} }
 
-  // Strategy 4: extract lines that look like JSON strings in an array
   const lines = stripped.split("\n")
     .map(l => l.replace(/^[-*"\d.\s]+/, "").replace(/[",]+$/, "").trim())
     .filter(l => l.length > 10);
@@ -181,11 +172,11 @@ async function googlePSESearch(query, options = {}) {
   }
 
   const params = new URLSearchParams({
-    key:        apiKey,
+    key:          apiKey,
     cx,
-    q:          query,
-    num:        options.num        || 5,
-    dateRestrict: options.dateRestrict || "y1",  // last 1 year by default
+    q:            query,
+    num:          options.num          || 5,
+    dateRestrict: options.dateRestrict || "y1",
     ...(options.sort ? { sort: options.sort } : {}),
   });
 
@@ -207,9 +198,7 @@ async function googlePSESearch(query, options = {}) {
   }
 }
 
-// Identify product category from brief text using Claude, then search for trends
 async function searchTrendsForBrief(briefText) {
-  // Step 1: extract product category
   const catRes = await client.messages.create({
     model: "claude-sonnet-4-20250514",
     max_tokens: 60,
@@ -219,24 +208,19 @@ async function searchTrendsForBrief(briefText) {
     }],
   });
   const category = catRes.content[0].text.trim();
-
-  // Step 2: search for 2025-2026 trend articles
-  const query   = `${category} trends 2025 2026`;
-  const results = await googlePSESearch(query, { num: 3, dateRestrict: "m18" });
-
+  const query    = `${category} trends 2025 2026`;
+  const results  = await googlePSESearch(query, { num: 3, dateRestrict: "m18" });
   return { category, results };
 }
 
-// Serialise a context value — arrays/objects as JSON, strings as-is
 function serialise(val) {
   if (typeof val === "string") return val;
   return JSON.stringify(val, null, 2);
 }
 
-// Rough token estimator — 1 token ~ 4 chars
 function estimateTokens(str) { return Math.ceil((str || "").length / 4); }
 
-const META_KEYS = new Set(["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers"]);
+const META_KEYS = new Set(["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers","ragMemory"]);
 const STAGE_NEEDS = {
   competitor:      [],
   market_analysis: ["competitor"],
@@ -259,8 +243,11 @@ function buildContextBlock(ctx, stageId) {
   if (ctx.featureDescription) parts.push("FEATURE DESCRIPTION: " + ctx.featureDescription);
   if (ctx.constraints)        parts.push(ctx.constraints);
 
-  const needed      = stageId ? (STAGE_NEEDS[stageId] || []) : [];
-  const allKeys     = Object.keys(ctx).filter(k => !META_KEYS.has(k));
+  // ── Inject RAG memory at the top of context ───────────────────────────────
+  if (ctx.ragMemory) parts.push(ctx.ragMemory);
+
+  const needed       = stageId ? (STAGE_NEEDS[stageId] || []) : [];
+  const allKeys      = Object.keys(ctx).filter(k => !META_KEYS.has(k));
   const relevantKeys = needed.length > 0 ? allKeys.filter(k => needed.includes(k)) : allKeys;
 
   if (relevantKeys.length > 0) {
@@ -305,6 +292,13 @@ async function buildProjectContext(projectId, project, stageId) {
     try { ctx[o.stage_id] = JSON.parse(o.content); }
     catch { ctx[o.stage_id] = o.content; }
   });
+
+  // ── Retrieve RAG memory for this project + stage ──────────────────────────
+  if (stageId) {
+    const query = `${project.name} ${project.description || ""} ${stageId}`;
+    ctx.ragMemory = await retrieveMemory({ query, projectId, topK: 4 });
+  }
+
   return ctx;
 }
 
@@ -329,6 +323,13 @@ async function buildFeatureContext(featureId, feature, project, stageId) {
     try { ctx[o.stage_id] = JSON.parse(o.content); }
     catch { ctx[o.stage_id] = o.content; }
   });
+
+  // ── Retrieve RAG memory for this feature + stage ──────────────────────────
+  if (stageId) {
+    const query = `${project.name} ${feature.name} ${feature.description || ""} ${stageId}`;
+    ctx.ragMemory = await retrieveMemory({ query, projectId: feature.project_id, topK: 4 });
+  }
+
   return ctx;
 }
 
@@ -359,10 +360,9 @@ Example: ["What is the primary monetisation model?", "Who is the decision maker 
     messages: [{ role: "user", content: prompt }],
   });
 
-  const text = response.content[0].text.trim();
+  const text   = response.content[0].text.trim();
   const parsed = safeParseJSON(text, true);
   if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === "string") return parsed;
-  // Final fallback — extract question-shaped lines
   const lines = text.split("\n")
     .map(l => l.replace(/^[-*"\d.\s]+/, "").replace(/[",]+$/, "").trim())
     .filter(l => l.includes("?") && l.length > 15);
@@ -376,7 +376,7 @@ Example: ["What is the primary monetisation model?", "Who is the decision maker 
 async function distillContext(stageId, ctx) {
   const stage = getStage(stageId);
   const stageKeys = Object.keys(ctx).filter(k =>
-    !["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers"].includes(k)
+    !["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers","ragMemory"].includes(k)
   );
 
   if (stageKeys.length === 0) return null;
@@ -425,17 +425,15 @@ app.post("/notion/push", async (req, res) => {
     const { projectName, featureName, stageId, stageLabel, content, renderer } = req.body;
     if (!content) return res.status(400).json({ error: "Content required." });
 
-    // Convert content to Notion blocks
     const blocks = contentToBlocks(content, renderer);
 
-    // Check if a page already exists for this project+feature+stage
     const search = await notionClient.databases.query({
       database_id: NOTION_DATABASE_ID,
       filter: {
         and: [
-          { property: "Project",  rich_text: { equals: projectName  || "" } },
-          { property: "Feature",  rich_text: { equals: featureName  || "" } },
-          { property: "Stage",    select:    { equals: stageLabel   || stageId } },
+          { property: "Project", rich_text: { equals: projectName || "" } },
+          { property: "Feature", rich_text: { equals: featureName || "" } },
+          { property: "Stage",   select:    { equals: stageLabel  || stageId } },
         ],
       },
     });
@@ -443,39 +441,29 @@ app.post("/notion/push", async (req, res) => {
     const now = new Date().toISOString();
 
     if (search.results.length > 0) {
-      // Update existing page
-      const pageId = search.results[0].id;
-
-      // Clear existing blocks then append new ones
+      const pageId  = search.results[0].id;
       const existing = await notionClient.blocks.children.list({ block_id: pageId });
-      await Promise.all(
-        existing.results.map(b => notionClient.blocks.delete({ block_id: b.id }))
-      );
+      await Promise.all(existing.results.map(b => notionClient.blocks.delete({ block_id: b.id })));
       await notionClient.blocks.children.append({ block_id: pageId, children: blocks });
-
-      // Update Last Synced property
       await notionClient.pages.update({
         page_id: pageId,
         properties: { "Last Synced": { date: { start: now } } },
       });
-
       res.json({ ok: true, action: "updated", pageId, url: search.results[0].url });
     } else {
-      // Create new page
       const page = await notionClient.pages.create({
         parent:     { database_id: NOTION_DATABASE_ID },
         icon:       { type: "emoji", emoji: stageEmoji(stageId) },
         properties: {
           Name:          { title:     [{ text: { content: `${stageLabel || stageId} — ${featureName || projectName}` } }] },
-          Project:       { rich_text: [{ text: { content: projectName  || "" } }] },
-          Feature:       { rich_text: [{ text: { content: featureName  || "" } }] },
+          Project:       { rich_text: [{ text: { content: projectName || "" } }] },
+          Feature:       { rich_text: [{ text: { content: featureName || "" } }] },
           Stage:         { select:    { name: stageLabel || stageId } },
           Status:        { select:    { name: "Draft" } },
           "Last Synced": { date:      { start: now } },
         },
         children: blocks,
       });
-
       res.json({ ok: true, action: "created", pageId: page.id, url: page.url });
     }
   } catch (e) {
@@ -499,7 +487,6 @@ function stageEmoji(stageId) {
 function contentToBlocks(content, renderer) {
   const blocks = [];
 
-  // Tickets — format as a table-like list
   if (renderer === "tickets") {
     let tickets = content;
     if (typeof content === "string") {
@@ -507,22 +494,11 @@ function contentToBlocks(content, renderer) {
     }
     if (Array.isArray(tickets)) {
       tickets.forEach(t => {
-        blocks.push({
-          object: "block", type: "heading_3",
-          heading_3: { rich_text: [{ type: "text", text: { content: t.title || "Untitled" } }] },
-        });
-        if (t.description) {
-          blocks.push({
-            object: "block", type: "paragraph",
-            paragraph: { rich_text: [{ type: "text", text: { content: t.description } }] },
-          });
-        }
+        blocks.push({ object: "block", type: "heading_3", heading_3: { rich_text: [{ type: "text", text: { content: t.title || "Untitled" } }] } });
+        if (t.description) blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: t.description } }] } });
         if (t.acceptanceCriteria?.length) {
           t.acceptanceCriteria.forEach(ac => {
-            blocks.push({
-              object: "block", type: "bulleted_list_item",
-              bulleted_list_item: { rich_text: [{ type: "text", text: { content: ac } }] },
-            });
+            blocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: [{ type: "text", text: { content: ac } }] } });
           });
         }
         blocks.push({ object: "block", type: "divider", divider: {} });
@@ -531,8 +507,7 @@ function contentToBlocks(content, renderer) {
     }
   }
 
-  // Plain text / markdown — parse into Notion blocks
-  const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+  const text  = typeof content === "string" ? content : JSON.stringify(content, null, 2);
   const lines = text.split("\n");
 
   lines.forEach(line => {
@@ -540,38 +515,41 @@ function contentToBlocks(content, renderer) {
       blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: [] } });
       return;
     }
-    if (/^# /.test(line)) {
-      blocks.push({ object: "block", type: "heading_1", heading_1: { rich_text: [{ type: "text", text: { content: line.replace(/^# /, "") } }] } });
-    } else if (/^## /.test(line)) {
-      blocks.push({ object: "block", type: "heading_2", heading_2: { rich_text: [{ type: "text", text: { content: line.replace(/^## /, "") } }] } });
-    } else if (/^### /.test(line)) {
-      blocks.push({ object: "block", type: "heading_3", heading_3: { rich_text: [{ type: "text", text: { content: line.replace(/^### /, "") } }] } });
-    } else if (/^[-*] /.test(line)) {
-      blocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: [{ type: "text", text: { content: line.replace(/^[-*] /, "") } }] } });
-    } else if (/^\d+\. /.test(line)) {
-      blocks.push({ object: "block", type: "numbered_list_item", numbered_list_item: { rich_text: [{ type: "text", text: { content: line.replace(/^\d+\. /, "") } }] } });
-    } else if (/^\|/.test(line) && !/^\|[-:]+/.test(line)) {
-      // Table rows — convert to bulleted list (Notion tables require complex setup)
+    if (/^# /.test(line))        blocks.push({ object: "block", type: "heading_1",           heading_1:           { rich_text: [{ type: "text", text: { content: line.replace(/^# /, "") } }] } });
+    else if (/^## /.test(line))  blocks.push({ object: "block", type: "heading_2",           heading_2:           { rich_text: [{ type: "text", text: { content: line.replace(/^## /, "") } }] } });
+    else if (/^### /.test(line)) blocks.push({ object: "block", type: "heading_3",           heading_3:           { rich_text: [{ type: "text", text: { content: line.replace(/^### /, "") } }] } });
+    else if (/^[-*] /.test(line)) blocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item:  { rich_text: [{ type: "text", text: { content: line.replace(/^[-*] /, "") } }] } });
+    else if (/^\d+\. /.test(line)) blocks.push({ object: "block", type: "numbered_list_item", numbered_list_item: { rich_text: [{ type: "text", text: { content: line.replace(/^\d+\. /, "") } }] } });
+    else if (/^\|/.test(line) && !/^\|[-:]+/.test(line)) {
       const cells = line.split("|").filter((_, i, a) => i > 0 && i < a.length - 1).map(c => c.trim()).join(" | ");
       if (cells) blocks.push({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: [{ type: "text", text: { content: cells } }] } });
     } else if (/^```/.test(line)) {
-      // Skip code fence markers
+      // skip fence markers
     } else {
-      // Notion blocks have a 2000 char limit per block
       const chunks = line.match(/.{1,1900}/g) || [line];
-      chunks.forEach(chunk => {
-        blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: chunk } }] } });
-      });
+      chunks.forEach(chunk => blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: [{ type: "text", text: { content: chunk } }] } }));
     }
   });
 
-  // Notion allows max 100 blocks per request
   return blocks.slice(0, 100);
 }
 
 // ── HEALTH CHECK ──────────────────────────────────────────────────────────────
 
 app.get("/health", (req, res) => res.json({ ok: true }));
+
+// ── DEBUG (remove before going public) ───────────────────────────────────────
+
+app.get("/debug/notion-config", (req, res) => {
+  res.json({
+    hasApiKey:       !!process.env.NOTION_API_KEY,
+    apiKeyLength:    process.env.NOTION_API_KEY?.length || 0,
+    hasDatabaseId:   !!process.env.NOTION_DATABASE_ID,
+    databaseId:      process.env.NOTION_DATABASE_ID || "MISSING",
+    notionClientReady: !!notionClient,
+    voyageConfigured:  !!process.env.VOYAGE_API_KEY,
+  });
+});
 
 // ── DISCOVERY INTERVIEW ───────────────────────────────────────────────────────
 
@@ -680,7 +658,6 @@ No preamble, no markdown fences, no explanation.`
     const text   = response.content[0].text.trim();
     const parsed = safeParseJSON(text, false);
     if (!parsed || typeof parsed !== "object") throw new Error("Invalid bucket structure returned");
-    // Ensure all 4 keys exist
     const buckets = { pain: [], feature: [], constraint: [], vibe: [], ...parsed };
     res.json({ buckets });
   } catch (e) {
@@ -691,26 +668,19 @@ No preamble, no markdown fences, no explanation.`
 app.post("/semantic-enhancements", async (req, res) => {
   try {
     const { buckets } = req.body;
-    const painItems  = (buckets.pain    || []).join("\n");
-    const techItems  = (buckets.tech    || []).join("\n");
-    const vibeItems  = (buckets.vibe    || []).join("\n");
+    const painItems  = (buckets.pain  || []).join("\n");
+    const techItems  = (buckets.tech  || []).join("\n");
+    const vibeItems  = (buckets.vibe  || []).join("\n");
     const allBuckets = Object.values(buckets).flat().join(" ");
 
-    // PSE: search for tools/APIs that solve the pain
     const searchQuery = `tools APIs solutions for: ${painItems.slice(0, 200)}`;
     const [pseResults, trendsData] = await Promise.all([
       googlePSESearch(searchQuery, { num: 5 }),
       searchTrendsForBrief(allBuckets),
     ]);
 
-    // Claude synthesises PSE results into actionable enhancements + trend insights
-    const pseBlock = pseResults.length
-      ? "SEARCH RESULTS:\n" + pseResults.map(r => `- ${r.title}: ${r.snippet} [${r.url}]`).join("\n")
-      : "No search results available.";
-
-    const trendsBlock = trendsData.results.length
-      ? "TREND ARTICLES (2025-2026):\n" + trendsData.results.map(r => `- ${r.title}: ${r.snippet} [${r.url}]`).join("\n")
-      : "No trend articles found.";
+    const pseBlock    = pseResults.length   ? "SEARCH RESULTS:\n"           + pseResults.map(r  => `- ${r.title}: ${r.snippet} [${r.url}]`).join("\n")  : "No search results available.";
+    const trendsBlock = trendsData.results.length ? "TREND ARTICLES (2025-2026):\n" + trendsData.results.map(r => `- ${r.title}: ${r.snippet} [${r.url}]`).join("\n") : "No trend articles found.";
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
@@ -793,23 +763,18 @@ Return only the brief text with the optional insights section.`
   }
 });
 
-// RESEARCH — PSE-powered research for "Research this" chat trigger
 app.post("/research", async (req, res) => {
   try {
-    const { query, projectId } = req.body;
+    const { query } = req.body;
     if (!query?.trim()) return res.status(400).json({ error: "Query required" });
 
-    // Run PSE search
     const results = await googlePSESearch(query, { num: 5, dateRestrict: "m12" });
 
     if (!results.length) {
       return res.json({ summary: "No results found via Google Search for: " + query, results: [] });
     }
 
-    // Claude summarises results
-    const resultsBlock = results.map((r, i) =>
-      `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`
-    ).join("\n\n");
+    const resultsBlock = results.map((r, i) => `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`).join("\n\n");
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-20250514",
@@ -827,11 +792,7 @@ Start with a one-line TL;DR.`
       }],
     });
 
-    res.json({
-      summary: response.content[0].text.trim(),
-      results,
-      query,
-    });
+    res.json({ summary: response.content[0].text.trim(), results, query });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -894,9 +855,9 @@ Additional rules for document generation:
       messages: [{ role: "user", content: prompt }],
     });
 
-    const content = response.content[0].text;
+    const content    = response.content[0].text;
     const titleMatch = content.match(/^#+ (.+)/m);
-    const title = titleMatch ? titleMatch[1].trim() : prompt.slice(0, 60);
+    const title      = titleMatch ? titleMatch[1].trim() : prompt.slice(0, 60);
 
     const doc = await docsDb.create(randomUUID(), req.params.id, title, prompt, content);
     res.json(doc);
@@ -908,14 +869,14 @@ app.post("/docs/:id/export-docx", async (req, res) => {
     const doc = await docsDb.getById(req.params.id);
     if (!doc) return res.status(404).json({ error: "Doc not found" });
 
-    const { execSync } = await import("child_process");
+    const { execSync }                      = await import("child_process");
     const { writeFileSync, readFileSync, unlinkSync } = await import("fs");
-    const { join } = await import("path");
-    const os = await import("os");
+    const { join }                          = await import("path");
+    const os                                = await import("os");
 
     const tmpDir     = os.tmpdir();
     const scriptPath = join(tmpDir, "gen_doc_" + Date.now() + ".js");
-    const outPath    = join(tmpDir, "export_" + Date.now() + ".docx");
+    const outPath    = join(tmpDir, "export_"  + Date.now() + ".docx");
 
     const buildPrompt = `You are converting this Markdown document to a Node.js script that generates a .docx file using the 'docx' npm package.
 
@@ -974,14 +935,14 @@ app.delete("/docs/:id", async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── INLINE EDIT SAVE ─────────────────────────────────────────────────────────
-// Called when a stage output is edited inline in the UI.
+// ── INLINE EDIT SAVE ──────────────────────────────────────────────────────────
 
 app.post("/projects/:id/outputs/save", async (req, res) => {
   try {
     const { stageId, content } = req.body;
     if (!stageId || content === undefined) return res.status(400).json({ error: "stageId and content required" });
-    await projectOutputsDb.save(randomUUID(), req.params.id, stageId, typeof content === "string" ? content : JSON.stringify(content));
+    const stored = typeof content === "string" ? content : JSON.stringify(content);
+    await projectOutputsDb.save(randomUUID(), req.params.id, stageId, stored);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -990,7 +951,8 @@ app.post("/features/:id/outputs/save", async (req, res) => {
   try {
     const { stageId, content } = req.body;
     if (!stageId || content === undefined) return res.status(400).json({ error: "stageId and content required" });
-    await featureOutputsDb.save(randomUUID(), req.params.id, stageId, typeof content === "string" ? content : JSON.stringify(content));
+    const stored = typeof content === "string" ? content : JSON.stringify(content);
+    await featureOutputsDb.save(randomUUID(), req.params.id, stageId, stored);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1007,14 +969,20 @@ app.post("/projects", async (req, res) => {
     const { name, description = "" } = req.body;
     const id = randomUUID();
     await projectsDb.create(id, name, description);
-    res.json(await projectsDb.getById(id));
+    const project = await projectsDb.getById(id);
+    // ── Embed project brief on creation ──────────────────────────────────────
+    embedProjectBrief({ projectId: id, projectName: name, description }).catch(console.error);
+    res.json(project);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.patch("/projects/:id", async (req, res) => {
   try {
     await projectsDb.update(req.params.id, req.body.name, req.body.description ?? "");
-    res.json(await projectsDb.getById(req.params.id));
+    const project = await projectsDb.getById(req.params.id);
+    // ── Re-embed on description update ───────────────────────────────────────
+    embedProjectBrief({ projectId: req.params.id, projectName: project.name, description: project.description }).catch(console.error);
+    res.json(project);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1066,9 +1034,9 @@ app.get("/projects/:id/outputs", async (req, res) => {
 
 app.post("/projects/:id/interview/:stageId", async (req, res) => {
   try {
-    const project = await projectsDb.getById(req.params.id);
+    const project   = await projectsDb.getById(req.params.id);
     if (!project) return res.status(404).json({ error: "Project not found" });
-    const ctx       = await buildProjectContext(req.params.id, project);
+    const ctx       = await buildProjectContext(req.params.id, project, req.params.stageId);
     const questions = await generateInterviewQuestions(req.params.stageId, ctx);
     res.json({ questions });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1079,17 +1047,14 @@ app.post("/projects/:id/run/:stageId", async (req, res) => {
     const project = await projectsDb.getById(req.params.id);
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    const ctx = await buildProjectContext(req.params.id, project);
+    const ctx = await buildProjectContext(req.params.id, project, req.params.stageId);
     if (req.body.interviewAnswers) ctx.interviewAnswers = req.body.interviewAnswers;
 
-    // For competitor stage — pre-fetch PSE results to ground Gemini analysis
     if (req.params.stageId === "competitor" && project.description) {
       const searchQuery = `${project.name} competitors alternatives 2025 2026`;
       const pseResults  = await googlePSESearch(searchQuery, { num: 5, dateRestrict: "m12" });
       if (pseResults.length) {
-        ctx.pseResults = pseResults.map((r, i) =>
-          `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`
-        ).join("\n\n");
+        ctx.pseResults = pseResults.map((r, i) => `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`).join("\n\n");
       }
     }
 
@@ -1099,6 +1064,15 @@ app.post("/projects/:id/run/:stageId", async (req, res) => {
     const result = await runStage(req.params.stageId, ctx);
     const stored = typeof result === "string" ? result : JSON.stringify(result);
     await projectOutputsDb.save(randomUUID(), req.params.id, req.params.stageId, stored);
+
+    // ── Embed stage output for future retrieval ───────────────────────────────
+    embedStageOutput({
+      projectId:   req.params.id,
+      stageId:     req.params.stageId,
+      content:     stored,
+      projectName: project.name,
+    }).catch(console.error);
+
     res.json({ result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1113,6 +1087,15 @@ app.get("/projects/:id/features", async (req, res) => {
 app.post("/projects/:id/features", async (req, res) => {
   try {
     const feature = await featuresDb.create(randomUUID(), req.params.id, req.body.name, req.body.description || "");
+    // ── Embed feature definition on creation ─────────────────────────────────
+    const project = await projectsDb.getById(req.params.id);
+    embedFeature({
+      projectId:   req.params.id,
+      featureId:   feature.id,
+      projectName: project?.name || "",
+      featureName: feature.name,
+      description: feature.description,
+    }).catch(console.error);
     res.json(feature);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1120,7 +1103,17 @@ app.post("/projects/:id/features", async (req, res) => {
 app.patch("/features/:id", async (req, res) => {
   try {
     await featuresDb.update(req.params.id, req.body.name, req.body.description ?? "");
-    res.json(await featuresDb.getById(req.params.id));
+    const feature = await featuresDb.getById(req.params.id);
+    const project = await projectsDb.getById(feature.project_id);
+    // ── Re-embed on update ────────────────────────────────────────────────────
+    embedFeature({
+      projectId:   feature.project_id,
+      featureId:   feature.id,
+      projectName: project?.name || "",
+      featureName: feature.name,
+      description: feature.description,
+    }).catch(console.error);
+    res.json(feature);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1145,10 +1138,10 @@ app.get("/features/:id/outputs", async (req, res) => {
 
 app.post("/features/:id/interview/:stageId", async (req, res) => {
   try {
-    const feature = await featuresDb.getById(req.params.id);
+    const feature   = await featuresDb.getById(req.params.id);
     if (!feature) return res.status(404).json({ error: "Feature not found" });
     const project   = await projectsDb.getById(feature.project_id);
-    const ctx       = await buildFeatureContext(req.params.id, feature, project);
+    const ctx       = await buildFeatureContext(req.params.id, feature, project, req.params.stageId);
     const questions = await generateInterviewQuestions(req.params.stageId, ctx);
     res.json({ questions });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1169,11 +1162,22 @@ app.post("/features/:id/run/:stageId", async (req, res) => {
     const result = await runStage(req.params.stageId, ctx);
     const stored = typeof result === "string" ? result : JSON.stringify(result);
     await featureOutputsDb.save(randomUUID(), req.params.id, req.params.stageId, stored);
+
+    // ── Embed feature stage output ────────────────────────────────────────────
+    embedStageOutput({
+      projectId:   feature.project_id,
+      featureId:   feature.id,
+      stageId:     req.params.stageId,
+      content:     stored,
+      projectName: project.name,
+      featureName: feature.name,
+    }).catch(console.error);
+
     res.json({ result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// CODE-READY PRD ──────────────────────────────────────────────────────────────
+// ── CODE-READY PRD ────────────────────────────────────────────────────────────
 
 app.post("/features/:id/code-ready-prd", async (req, res) => {
   try {
@@ -1189,26 +1193,37 @@ app.post("/features/:id/code-ready-prd", async (req, res) => {
     const prdOutput = featureOutputs.find(o => o.stage_id === "prd");
     if (!prdOutput) return res.status(400).json({ error: "Run the PRD stage first." });
 
-    const { screenshots = [] } = req.body; // base64 images array
+    const { screenshots = [] } = req.body;
+    const constraintBlock      = formatConstraints(constraints);
+    const messageContent       = [];
 
-    const constraintBlock = formatConstraints(constraints);
-
-    // Build message content — text + optional images
-    const messageContent = [];
-
-    // Add screenshots as vision inputs
-    screenshots.forEach((img) => {
-      messageContent.push({
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: img.mediaType || "image/png",
-          data: img.data,
-        },
-      });
+    screenshots.forEach(img => {
+      messageContent.push({ type: "image", source: { type: "base64", media_type: img.mediaType || "image/png", data: img.data } });
     });
 
-    // Add the main prompt
+    // ── Embed UI screenshot descriptions ─────────────────────────────────────
+    if (screenshots.length > 0) {
+      const descRes = await client.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 400,
+        messages: [{
+          role: "user",
+          content: [
+            ...screenshots.map(img => ({ type: "image", source: { type: "base64", media_type: img.mediaType || "image/png", data: img.data } })),
+            { type: "text", text: "Describe the UI shown in these screenshots in 3-5 sentences, focusing on layout, components, and user interactions visible." }
+          ]
+        }],
+      });
+      const uiDesc = descRes.content[0].text;
+      embedUIDescription({
+        projectId:   feature.project_id,
+        featureId:   feature.id,
+        projectName: project.name,
+        featureName: feature.name,
+        description: uiDesc,
+      }).catch(console.error);
+    }
+
     messageContent.push({
       type: "text",
       text: `You are a Senior Technical Product Manager and Software Architect.
@@ -1247,25 +1262,14 @@ For every API endpoint mentioned or implied:
 
 ## 3. State Machine Definition
 Define all UI lifecycle states for this feature:
-- Idle: what the user sees before any action
-- Loading/Processing: visual changes during async operations
-- Success: what changes after successful completion
-- Error: what the user sees and can do on failure
+- Idle / Loading / Success / Error
 Be specific — name actual UI elements that change in each state.
 
 ## 4. Edge Case Matrix
-Identify exactly 3 technical failure points. For each:
-- Failure name (e.g. Network Timeout)
-- Trigger condition
-- UI response (what the user sees)
-- Recovery action (what the user can do)
-Format as a table.
+Identify exactly 3 technical failure points. Format as a table.
 
 ## 5. Atomic Implementation Plan
-Break the build into 5-8 sequential tasks. Each task must:
-- Be executable by a coding agent in under 15 minutes
-- Have a single clear deliverable
-- Be independently testable
+Break the build into 5-8 sequential tasks.
 Format as numbered list: Task N — [name]: [description] → Deliverable: [what exists when done]`
     });
 
@@ -1277,9 +1281,16 @@ Format as numbered list: Task N — [name]: [description] → Deliverable: [what
     });
 
     const prdContent = response.content[0].text.trim();
-
-    // Save as stage_id "code_ready_prd"
     await featureOutputsDb.save(randomUUID(), feature.id, "code_ready_prd", prdContent);
+
+    embedStageOutput({
+      projectId:   feature.project_id,
+      featureId:   feature.id,
+      stageId:     "code_ready_prd",
+      content:     prdContent,
+      projectName: project.name,
+      featureName: feature.name,
+    }).catch(console.error);
 
     res.json({ content: prdContent });
   } catch (e) {
@@ -1293,12 +1304,10 @@ app.post("/features/:id/code-ready-prd/save", async (req, res) => {
     if (!content) return res.status(400).json({ error: "Content required" });
     await featureOutputsDb.save(randomUUID(), req.params.id, "code_ready_prd", content);
     res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// CODE-READY STORIES ──────────────────────────────────────────────────────────
+// ── CODE-READY STORIES ────────────────────────────────────────────────────────
 
 app.post("/features/:id/code-stories", async (req, res) => {
   try {
@@ -1311,7 +1320,6 @@ app.post("/features/:id/code-stories", async (req, res) => {
       constraintsDb.getAllForProject(feature.project_id),
     ]);
 
-    // Pull PRD output as the primary source
     const prdOutput = featureOutputs.find(o => o.stage_id === "prd");
     if (!prdOutput) return res.status(400).json({ error: "Run the PRD stage first — stories are generated from the PRD." });
 
@@ -1333,13 +1341,7 @@ ${prdOutput.content}
 Break this feature into exactly 3 atomic user stories. Each story must be independently implementable by an engineer.
 
 For each story return a JSON object with these exact keys:
-- title: short story title (e.g. "User can submit parcel details form")
-- persona: who the user is (1 sentence)
-- job: the JTBD statement — "When [situation], I want to [action], so I can [outcome]"
-- dataModel: specific DB schema changes, state shape, or data structure needed
-- apiHandshake: { endpoint, method, requestExample, responseExample } — real JSON examples, not placeholders
-- acceptanceCriteria: array of exactly 4 Pass/Fail test statements starting with "PASS if..." or "FAIL if..."
-- edgeCases: array of exactly 3 edge cases — what happens when network fails, input is empty, or data is invalid
+- title, persona, job (JTBD), dataModel, apiHandshake, acceptanceCriteria (4 items), edgeCases (3 items)
 
 Return ONLY a JSON array of 3 story objects. No preamble, no markdown fences.`;
 
@@ -1356,23 +1358,27 @@ Return ONLY a JSON array of 3 story objects. No preamble, no markdown fences.`;
       throw new Error("Could not parse stories — Claude returned unexpected format. Try again.");
     }
 
-    // Save to feature_outputs as stage_id "code_stories"
     const stored = JSON.stringify(stories);
     await featureOutputsDb.save(randomUUID(), feature.id, "code_stories", stored);
 
-    res.json({ stories });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+    embedStageOutput({
+      projectId:   feature.project_id,
+      featureId:   feature.id,
+      stageId:     "code_stories",
+      content:     stored,
+      projectName: project.name,
+      featureName: feature.name,
+    }).catch(console.error);
 
+    res.json({ stories });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 app.post("/features/:id/code-stories/save", async (req, res) => {
   try {
     const { stories } = req.body;
     if (!stories) return res.status(400).json({ error: "Stories required" });
-    const stored = JSON.stringify(stories);
-    await featureOutputsDb.save(randomUUID(), req.params.id, "code_stories", stored);
+    await featureOutputsDb.save(randomUUID(), req.params.id, "code_stories", JSON.stringify(stories));
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1383,19 +1389,11 @@ app.post("/enhance-gemini", async (req, res) => {
   try {
     const { prompt, maxTokens = 3000 } = req.body;
     if (!prompt?.trim()) return res.status(400).json({ error: "Prompt required" });
-
-    if (!geminiClient) {
-      return res.status(503).json({ error: "GEMINI_API_KEY not configured on server." });
-    }
-
+    if (!geminiClient) return res.status(503).json({ error: "GEMINI_API_KEY not configured on server." });
     const text = await callGeminiWithFallback(prompt, maxTokens);
     res.json({ result: text });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
-
-// ── WRITING ENHANCER ──────────────────────────────────────────────────────────
 
 app.post("/enhance", async (req, res) => {
   const { prompt, maxTokens = 3000 } = req.body;
@@ -1465,6 +1463,14 @@ app.post("/chat", async (req, res) => {
         });
       }
     }
+
+    // ── Inject RAG memory into chat context ───────────────────────────────────
+    if (projectId) {
+      const lastMsg  = messages[messages.length - 1]?.content || "";
+      const ragMemory = await retrieveMemory({ query: lastMsg, projectId, topK: 3 });
+      if (ragMemory) systemContext += ragMemory;
+    }
+
   } catch (e) { console.error("Context error:", e.message); }
 
   const system = `${AGENT_RULES}
@@ -1477,21 +1483,17 @@ Trigger phrases: "I want to build", "I have an idea", "what do you think about",
 ## Project Context
 ${systemContext}`;
 
-  // Detect "Research this" trigger — run PSE search and prepend results to context
-  const lastUserMsg = messages[messages.length - 1]?.content || "";
-  const researchMatch = lastUserMsg.match(/research\s+(?:this[:\s]+)?(.+)/i);
+  const lastUserMsg    = messages[messages.length - 1]?.content || "";
+  const researchMatch  = lastUserMsg.match(/research\s+(?:this[:\s]+)?(.+)/i);
 
   if (researchMatch) {
     try {
       const searchQuery = researchMatch[1]?.trim() || lastUserMsg;
       const pseResults  = await googlePSESearch(searchQuery, { num: 5, dateRestrict: "m12" });
       if (pseResults.length) {
-        const resultsBlock = pseResults.map((r, i) =>
-          `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`
-        ).join("\n\n");
-        // Inject search results into the final user message
+        const resultsBlock = pseResults.map((r, i) => `[${i+1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`).join("\n\n");
         messages[messages.length - 1] = {
-          role: "user",
+          role:    "user",
           content: `${lastUserMsg}\n\nGOOGLE SEARCH RESULTS:\n${resultsBlock}\n\nSummarise these results and identify the top 5 competitors or relevant data points. Cite all sources.`,
         };
       }
@@ -1516,32 +1518,11 @@ ${systemContext}`;
 Promise.all([initDb()]).then(() => {
   app.listen(3001, () => {
     console.log("PM Agent server running on http://localhost:3001");
-    console.log("API Key:", process.env.ANTHROPIC_API_KEY ? "loaded" : "MISSING");
-    console.log("Notion:", notionClient ? "connected" : "not configured");
+    console.log("API Key:",  process.env.ANTHROPIC_API_KEY ? "loaded"     : "MISSING");
+    console.log("Notion:",   notionClient                  ? "connected"  : "not configured");
+    console.log("Voyage:",   process.env.VOYAGE_API_KEY   ? "configured" : "not configured — RAG disabled");
   });
 }).catch(err => {
   console.error("Failed to start server:", err.message);
   process.exit(1);
-});
-app.get("/debug/notion", async (req, res) => {
-  try {
-    const mod = await import("@notionhq/client");
-    res.json({
-      keys: Object.keys(mod),
-      defaultKeys: mod.default ? Object.keys(mod.default) : null,
-      clientType: typeof mod.Client,
-      defaultType: typeof mod.default,
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-app.get("/debug/notion-config", (req, res) => {
-  res.json({
-    hasApiKey: !!process.env.NOTION_API_KEY,
-    apiKeyLength: process.env.NOTION_API_KEY?.length || 0,
-    hasDatabaseId: !!process.env.NOTION_DATABASE_ID,
-    databaseId: process.env.NOTION_DATABASE_ID || "MISSING",
-    notionClientReady: !!notionClient,
-  });
 });
