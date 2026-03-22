@@ -9,7 +9,6 @@ const { Client: NotionClient } = pkg;
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb, pool } from "./db.js";
 import { embedStageOutput, embedProjectBrief, embedFeature, embedUIDescription, retrieveMemory } from "./embeddings.js";
 dotenv.config();
-import { getStage } from "./stageRegistry.js";
 import { runStage } from "./agents/stageRunner.js";
 import { STAGES, PROJECT_STAGES, FEATURE_STAGES, getStage } from "./stageRegistry.js";
 
