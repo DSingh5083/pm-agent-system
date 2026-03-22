@@ -9,6 +9,30 @@ const { Client: NotionClient } = pkg;
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb, pool } from "./db.js";
 import { embedStageOutput, embedProjectBrief, embedFeature, embedUIDescription, retrieveMemory } from "./embeddings.js";
 dotenv.config();
+import { getStage } from "./stageRegistry.js";
+import { runStage } from "./agents/stageRunner.js";
+import { STAGES, PROJECT_STAGES, FEATURE_STAGES, getStage } from "./stageRegistry.js";
+
+async function runStage(stageId, ctx) {
+  const stage = getStage(stageId);
+  if (!stage) throw new Error(`Unknown stage: ${stageId}`);
+
+  const prompt = typeof stage.prompt === "function" ? stage.prompt(ctx) : stage.prompt;
+  const contextBlock = buildContextBlock(ctx, stageId);
+  const fullPrompt = `${AGENT_RULES}\n\n${contextBlock}\n\n${prompt}`;
+
+  if (stage.model === "gemini") {
+    return await callGeminiWithFallback(fullPrompt, 6000);
+  }
+
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 6000,
+    messages: [{ role: "user", content: fullPrompt }],
+  });
+
+  return response.content[0].text;
+}
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const geminiClient = process.env.GEMINI_API_KEY
