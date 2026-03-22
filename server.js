@@ -6,7 +6,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import pkg from "@notionhq/client";
 const { Client: NotionClient } = pkg;
-import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb } from "./db.js";
+import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb, pool } from "./db.js";
 import { embedStageOutput, embedProjectBrief, embedFeature, embedUIDescription, retrieveMemory } from "./embeddings.js";
 dotenv.config();
 
