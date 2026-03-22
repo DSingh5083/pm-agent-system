@@ -3,7 +3,7 @@
 // No JSX — pure logic hook.
 
 import { useState } from "react";
-import { apiFetch, API } from "../../../lib/apiClient";  // adjust path depth
+import { apiFetch, API } from "../../lib/apiClient";  // adjust path depth
 
 export function useSemanticSort({ onApprove }) {
   const [step,                 setStep]                 = useState("input");

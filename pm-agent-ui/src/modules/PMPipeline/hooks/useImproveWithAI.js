@@ -3,7 +3,7 @@
 // Returns state and handlers — no JSX.
 
 import { useState } from "react";
-import { apiFetch, API } from "../../../lib/apiClient";  // adjust path depth
+import { apiFetch, API } from "../../lib/apiClient";  // adjust path depth
 
 export function useImproveWithAI() {
   const [improving, setImproving] = useState(false);

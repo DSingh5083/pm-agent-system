@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { apiFetch, API } from "../../../lib/apiClient";  // adjust path depth
+import { apiFetch, API } from "../../lib/apiClient";  // adjust path depth
 
 export default function DiscoveryInterviewModal({ project, onClose, onComplete }) {
   const [questions,  setQuestions]  = useState(null);

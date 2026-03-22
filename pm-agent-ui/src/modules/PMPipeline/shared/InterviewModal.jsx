@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { apiFetch } from "../../../lib/apiClient";
+import { apiFetch } from "../../lib/apiClient";
 
 export default function InterviewModal({ stage, interviewEndpoint, runEndpoint, onComplete, onCancel }) {
   const [phase,     setPhase]     = useState("loading"); // loading | questions | running | distilling

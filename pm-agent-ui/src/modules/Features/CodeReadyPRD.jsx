@@ -4,7 +4,7 @@
 // Editable inline, downloadable as .md.
 
 import { useState, useRef } from "react";
-import { apiFetch, API } from "../../../lib/apiClient";  // adjust path depth
+import { apiFetch, API } from "../../lib/apiClient";  // adjust path depth
 
 // ── Screenshot uploader ───────────────────────────────────────────────────────
 

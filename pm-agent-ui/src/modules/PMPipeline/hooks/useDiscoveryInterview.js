@@ -2,7 +2,7 @@
 // Discovery interview question generation and answer submission logic.
 
 import { useState, useEffect } from "react";
-import { apiFetch, API } from "../../../lib/apiClient";  // adjust path depth
+import { apiFetch, API } from "../../lib/apiClient";  // adjust path depth
 
 export function useDiscoveryInterview(project) {
   const [questions,  setQuestions]  = useState(null);

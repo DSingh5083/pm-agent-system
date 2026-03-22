@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { callClaude } from "../../lib/claude.js";
-import { apiFetch } from "../../../lib/apiClient";
+import { apiFetch } from "../../lib/apiClient";
 import { SectionLabel, EmptyState, CopyButton, PillToggle } from "../../components/ui.jsx";
 
 // ── Enhance Writing Config ────────────────────────────────────────────────────

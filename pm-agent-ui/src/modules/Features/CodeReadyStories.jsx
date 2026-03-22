@@ -3,7 +3,7 @@
 // Each story is an expandable card with 4 editable sections.
 
 import { useState } from "react";
-import { apiFetch, API } from "../../../lib/apiClient";  // adjust path depth
+import { apiFetch, API } from "../../lib/apiClient";  // adjust path depth
 
 // Safely convert any value to a renderable string
 function safeStr(val) {

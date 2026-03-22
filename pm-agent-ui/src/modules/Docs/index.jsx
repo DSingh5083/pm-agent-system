@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { apiFetch, API } from "../../../lib/apiClient";
+import { apiFetch, API } from "../../lib/apiClient";
 
 // Starter prompts shown when no project context yet
 const STARTER_PROMPTS = [
