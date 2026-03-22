@@ -4,7 +4,7 @@
 
 import { useState, useRef, useEffect } from "react";
 
-import { apiFetch, API } from "../../../lib/api";  // adjust path depth
+import { apiFetch, API } from "../../../lib/apiClient";  // adjust path depth
 
 const STARTERS = [
   { icon: "📄", label: "Review my PRD",              prompt: "Review my PRD and tell me what's missing, unclear, or needs strengthening. Be specific." },

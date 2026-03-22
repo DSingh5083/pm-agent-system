@@ -3,7 +3,7 @@
 // Content rendering delegated to renderers.jsx.
 
 import { useState, useEffect } from "react";
-import { apiFetch, API } from "../../../lib/api";  // adjust path depthimport InterviewModal from "../shared/InterviewModal.jsx";
+import { apiFetch, API } from "../../../lib/apiClient";  // adjust path depthimport InterviewModal from "../shared/InterviewModal.jsx";
 import { SectionedText, TicketList, MermaidDiagram } from "./renderers.jsx";
 
 // ── Copy button ───────────────────────────────────────────────────────────────

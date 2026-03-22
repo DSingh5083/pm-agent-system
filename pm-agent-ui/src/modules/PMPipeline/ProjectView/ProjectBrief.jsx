@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { apiFetch, API } from "../../../lib/api";  // adjust path depth
+import { apiFetch, API } from "../../../lib/apiClient";  // adjust path depth
 import SemanticSortModal from "../shared/SemanticSort.jsx";
 
 
