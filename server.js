@@ -1526,3 +1526,16 @@ Promise.all([initDb()]).then(() => {
   console.error("Failed to start server:", err.message);
   process.exit(1);
 });
+app.get("/debug/docs-schema", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'docs'
+      ORDER BY column_name
+    `);
+    res.json(result.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
