@@ -463,7 +463,7 @@ app.post("/notion/push", async (req, res) => {
           Project:       { rich_text: [{ text: { content: projectName || "" } }] },
           Feature:       { rich_text: [{ text: { content: featureName || "" } }] },
           Stage:         { multi_select: [{ name: stageLabel || stageId }] },
-          Status:        { select:    { name: "Draft" } },
+          Status:        { multi_select:  { name: "Draft" } },
           "Last Synced": { date:      { start: now } },
         },
         children: blocks,
