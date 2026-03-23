@@ -449,24 +449,30 @@ app.post("/notion/push", async (req, res) => {
       const existing = await notionClient.blocks.children.list({ block_id: pageId });
       await Promise.all(existing.results.map(b => notionClient.blocks.delete({ block_id: b.id })));
       await notionClient.blocks.children.append({ block_id: pageId, children: blocks });
-      await notionClient.pages.update({
-        page_id: pageId,
-        properties: { "Last Synced": { date: { start: now } } },
-      });
+      // Only update Last Synced if that column exists in your DB
+      // await notionClient.pages.update({
+      //   page_id: pageId,
+      //   properties: { "Last Synced": { date: { start: now } } },
+      // });
       res.json({ ok: true, action: "updated", pageId, url: search.results[0].url });
     } else {
+      // Build properties using only confirmed DB columns
+      const createProperties = {
+        Name:    { title:     [{ text: { content: `${stageLabel || stageId} — ${featureName || projectName}` } }] },
+        Project: { rich_text: [{ text: { content: projectName || "" } }] },
+        Feature: { rich_text: [{ text: { content: featureName || "" } }] },
+        Status:  { multi_select: [{ name: "Draft" }] },
+      };
+      // Add Stage only if the column exists in your DB
+      if (stageLabel || stageId) createProperties["Stage"] = { multi_select: [{ name: stageLabel || stageId }] };
+      // Uncomment if you have a Last Synced date field:
+      // createProperties["Last Synced"] = { date: { start: now } };
+
       const page = await notionClient.pages.create({
         parent:     { database_id: NOTION_DATABASE_ID },
         icon:       { type: "emoji", emoji: stageEmoji(stageId) },
-        properties: {
-          Name:          { title:     [{ text: { content: `${stageLabel || stageId} — ${featureName || projectName}` } }] },
-          Project:       { rich_text: [{ text: { content: projectName || "" } }] },
-          Feature:       { rich_text: [{ text: { content: featureName || "" } }] },
-          Stage:         { multi_select: [{ name: stageLabel || stageId }] },
-          Status:        { multi_select:  { name: "Draft" } },
-          "Last Synced": { date:      { start: now } },
-        },
-        children: blocks,
+        properties: createProperties,
+        children:   blocks,
       });
       res.json({ ok: true, action: "created", pageId: page.id, url: page.url });
     }
