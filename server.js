@@ -5,7 +5,7 @@ import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import pkg from "@notionhq/client";
-const { Client: NotionClient } = pkg;
+const NotionClient = pkg.default ? pkg.default.Client : pkg.Client;
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb, pool } from "./db.js";
 import { embedStageOutput, embedProjectBrief, embedFeature, embedUIDescription, retrieveMemory } from "./embeddings.js";
 dotenv.config();
