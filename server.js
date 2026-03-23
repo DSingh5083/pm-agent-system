@@ -4,7 +4,15 @@ import dotenv from "dotenv";
 import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { Client as NotionClient } from "@notionhq/client";
+import {
+  Client as NotionClient,
+  queryDatabase,
+  listBlockChildren,
+  deleteBlock,
+  appendBlockChildren,
+  updatePage,
+  createPage,
+} from "@notionhq/client";
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb, pool } from "./db.js";
 import { embedStageOutput, embedProjectBrief, embedFeature, embedUIDescription, retrieveMemory } from "./embeddings.js";
 dotenv.config();
@@ -430,13 +438,13 @@ app.post("/notion/push", async (req, res) => {
 
     const blocks = contentToBlocks(content, renderer);
 
-    const search = await notionClient.databases.query({
+    const search = await queryDatabase(notionClient, {
       database_id: NOTION_DATABASE_ID,
       filter: {
         and: [
           { property: "Project", rich_text: { equals: projectName || "" } },
           { property: "Feature", rich_text: { equals: featureName || "" } },
-          { property: "Stage",   select:    { equals: stageLabel  || stageId } },
+          { property: "Stage",   multi_select: { equals: stageLabel  || stageId } },
         ],
       },
     });
@@ -444,24 +452,24 @@ app.post("/notion/push", async (req, res) => {
     const now = new Date().toISOString();
 
     if (search.results.length > 0) {
-      const pageId  = search.results[0].id;
-      const existing = await notionClient.blocks.children.list({ block_id: pageId });
-      await Promise.all(existing.results.map(b => notionClient.blocks.delete({ block_id: b.id })));
-      await notionClient.blocks.children.append({ block_id: pageId, children: blocks });
-      await notionClient.pages.update({
-        page_id: pageId,
+      const pageId   = search.results[0].id;
+      const existing = await listBlockChildren(notionClient, { block_id: pageId });
+      await Promise.all(existing.results.map(b => deleteBlock(notionClient, { block_id: b.id })));
+      await appendBlockChildren(notionClient, { block_id: pageId, children: blocks });
+      await updatePage(notionClient, {
+        page_id:    pageId,
         properties: { "Last Synced": { date: { start: now } } },
       });
       res.json({ ok: true, action: "updated", pageId, url: search.results[0].url });
     } else {
-      const page = await notionClient.pages.create({
+      const page = await createPage(notionClient, {
         parent:     { database_id: NOTION_DATABASE_ID },
         icon:       { type: "emoji", emoji: stageEmoji(stageId) },
         properties: {
           Name:          { title:     [{ text: { content: `${stageLabel || stageId} — ${featureName || projectName}` } }] },
           Project:       { rich_text: [{ text: { content: projectName || "" } }] },
           Feature:       { rich_text: [{ text: { content: featureName || "" } }] },
-          Stage:         { select:    { name: stageLabel || stageId } },
+          Stage:         { multi_select:    { name: stageLabel || stageId } },
           Status:        { select:    { name: "Draft" } },
           "Last Synced": { date:      { start: now } },
         },
@@ -541,17 +549,48 @@ function contentToBlocks(content, renderer) {
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-// ── DEBUG (remove before going public) ───────────────────────────────────────
+// ── DEBUG ─────────────────────────────────────────────────────────────────────
 
 app.get("/debug/notion-config", (req, res) => {
   res.json({
-    hasApiKey:       !!process.env.NOTION_API_KEY,
-    apiKeyLength:    process.env.NOTION_API_KEY?.length || 0,
-    hasDatabaseId:   !!process.env.NOTION_DATABASE_ID,
-    databaseId:      process.env.NOTION_DATABASE_ID || "MISSING",
+    hasApiKey:         !!process.env.NOTION_API_KEY,
+    apiKeyLength:      process.env.NOTION_API_KEY?.length || 0,
+    hasDatabaseId:     !!process.env.NOTION_DATABASE_ID,
+    databaseId:        process.env.NOTION_DATABASE_ID || "MISSING",
     notionClientReady: !!notionClient,
     voyageConfigured:  !!process.env.VOYAGE_API_KEY,
   });
+});
+
+app.get("/debug/notion-client", (req, res) => {
+  res.json({
+    notionClientType:    typeof notionClient,
+    notionClientKeys:    notionClient ? Object.keys(notionClient) : null,
+    hasDatabasesQuery:   typeof notionClient?.databases?.query,
+    databasesKeys:       notionClient?.databases ? Object.keys(notionClient.databases) : null,
+    // v5 standalone function checks
+    queryDatabaseType:       typeof queryDatabase,
+    listBlockChildrenType:   typeof listBlockChildren,
+    deleteBlockType:         typeof deleteBlock,
+    appendBlockChildrenType: typeof appendBlockChildren,
+    updatePageType:          typeof updatePage,
+    createPageType:          typeof createPage,
+    NotionClientType:    typeof NotionClient,
+  });
+});
+
+app.get("/debug/docs-schema", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'docs'
+      ORDER BY column_name
+    `);
+    res.json(result.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── DISCOVERY INTERVIEW ───────────────────────────────────────────────────────
@@ -1528,25 +1567,4 @@ Promise.all([initDb()]).then(() => {
 }).catch(err => {
   console.error("Failed to start server:", err.message);
   process.exit(1);
-});
-app.get("/debug/docs-schema", async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT column_name, data_type 
-      FROM information_schema.columns 
-      WHERE table_name = 'docs'
-      ORDER BY column_name
-    `);
-    res.json(result.rows);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-app.get("/debug/notion-client", (req, res) => {
-  res.json({
-    notionClientType: typeof notionClient,
-    notionClientKeys: notionClient ? Object.keys(notionClient) : null,
-    hasDatabasesQuery: typeof notionClient?.databases?.query,
-    NotionClientType: typeof NotionClient,
-  });
 });
