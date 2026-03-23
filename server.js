@@ -1543,3 +1543,11 @@ app.get("/debug/docs-schema", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+app.get("/debug/notion-client", (req, res) => {
+  res.json({
+    notionClientType: typeof notionClient,
+    notionClientKeys: notionClient ? Object.keys(notionClient) : null,
+    hasDatabasesQuery: typeof notionClient?.databases?.query,
+    NotionClientType: typeof NotionClient,
+  });
+});
