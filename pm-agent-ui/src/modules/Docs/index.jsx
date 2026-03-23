@@ -1,7 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { apiFetch, API } from "../../lib/apiClient";
+// ─────────────────────────────────────────────────────────────────────────────
+// modules/Docs/index.jsx
+// Project/feature selector added at top — switch context without leaving Docs.
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Starter prompts shown when no project context yet
+import { useState, useEffect, useRef, useCallback } from "react";
+import { apiFetch } from "../../lib/apiClient";
+
 const STARTER_PROMPTS = [
   { icon: "🤝", label: "Status Update",    prompt: "Write a project status update summarising key accomplishments, current priorities, and blockers for my stakeholders." },
   { icon: "📊", label: "Retrospective",    prompt: "Create a retrospective doc with sections for: what went well, what could be improved, action items, and shoutouts." },
@@ -11,6 +15,66 @@ const STARTER_PROMPTS = [
   { icon: "⚠️", label: "Risk Register",    prompt: "Create a risk register for this project. For each risk include: description, likelihood, impact, severity score, mitigation plan, and owner." },
 ];
 
+// ── Context selector ──────────────────────────────────────────────────────────
+
+function ContextSelector({ ps, selectedProject, selectedFeature, onProjectChange, onFeatureChange }) {
+  const { projects, features, loadProject } = ps;
+
+  const handleProjectChange = async (projectId) => {
+    if (!projectId) { onProjectChange(null); onFeatureChange(null); return; }
+    const project = projects.find(p => p.id === projectId);
+    if (project) {
+      await loadProject(project);
+      onProjectChange(project);
+      onFeatureChange(null);
+    }
+  };
+
+  const handleFeatureChange = (featureId) => {
+    const feature = features.find(f => f.id === featureId);
+    onFeatureChange(feature || null);
+  };
+
+  return (
+    <div style={{ padding: "10px 20px", background: "#fff", borderBottom: "1px solid #e8e8e8", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+      <span style={{ fontSize: 11, color: "#aaa", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Context</span>
+
+      <select
+        value={selectedProject?.id || ""}
+        onChange={e => handleProjectChange(e.target.value)}
+        style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, color: "#1a1a2a", background: "#f5f6f8", cursor: "pointer", outline: "none", fontFamily: "inherit" }}
+      >
+        <option value="">— Select project —</option>
+        {projects.map(p => (
+          <option key={p.id} value={p.id}>{p.name}</option>
+        ))}
+      </select>
+
+      {selectedProject && features.length > 0 && (
+        <>
+          <span style={{ color: "#ccc", fontSize: 14 }}>›</span>
+          <select
+            value={selectedFeature?.id || ""}
+            onChange={e => handleFeatureChange(e.target.value)}
+            style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, color: "#1a1a2a", background: "#f5f6f8", cursor: "pointer", outline: "none", fontFamily: "inherit" }}
+          >
+            <option value="">— Project level —</option>
+            {features.map(f => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
+        </>
+      )}
+
+      {selectedProject && (
+        <span style={{ fontSize: 11, color: "#0066FF", marginLeft: "auto", background: "#0066FF0d", padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>
+          📁 {selectedProject.name}{selectedFeature ? ` › ${selectedFeature.name}` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── Markdown renderer ─────────────────────────────────────────────────────────
 
 function renderMarkdown(md, onCheckboxToggle) {
@@ -19,7 +83,6 @@ function renderMarkdown(md, onCheckboxToggle) {
   const elements = [];
   let i = 0;
   let key = 0;
-
   const nextKey = () => ++key;
 
   function inlineFormat(text) {
@@ -42,41 +105,21 @@ function renderMarkdown(md, onCheckboxToggle) {
     const line = lines[i];
 
     if (/^# (.+)/.test(line)) {
-      const text = line.replace(/^# /, "");
-      elements.push(
-        <h1 key={nextKey()} style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2a", margin: "28px 0 8px", paddingBottom: 8, borderBottom: "2px solid #e8e8e8", lineHeight: 1.3 }}>
-          {inlineFormat(text)}
-        </h1>
-      );
+      elements.push(<h1 key={nextKey()} style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2a", margin: "28px 0 8px", paddingBottom: 8, borderBottom: "2px solid #e8e8e8", lineHeight: 1.3 }}>{inlineFormat(line.replace(/^# /, ""))}</h1>);
       i++; continue;
     }
-
     if (/^## (.+)/.test(line)) {
-      const text = line.replace(/^## /, "");
-      elements.push(
-        <h2 key={nextKey()} style={{ fontSize: 17, fontWeight: 700, color: "#1a1a2a", margin: "22px 0 6px", display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 4, height: 18, background: "#0066FF", borderRadius: 2, flexShrink: 0, display: "inline-block" }} />
-          {inlineFormat(text)}
-        </h2>
-      );
+      elements.push(<h2 key={nextKey()} style={{ fontSize: 17, fontWeight: 700, color: "#1a1a2a", margin: "22px 0 6px", display: "flex", alignItems: "center", gap: 8 }}><span style={{ width: 4, height: 18, background: "#0066FF", borderRadius: 2, flexShrink: 0, display: "inline-block" }} />{inlineFormat(line.replace(/^## /, ""))}</h2>);
       i++; continue;
     }
-
     if (/^### (.+)/.test(line)) {
-      const text = line.replace(/^### /, "");
-      elements.push(
-        <h3 key={nextKey()} style={{ fontSize: 12, fontWeight: 700, color: "#888", margin: "16px 0 4px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-          {inlineFormat(text)}
-        </h3>
-      );
+      elements.push(<h3 key={nextKey()} style={{ fontSize: 12, fontWeight: 700, color: "#888", margin: "16px 0 4px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{inlineFormat(line.replace(/^### /, ""))}</h3>);
       i++; continue;
     }
-
     if (/^---+$/.test(line.trim())) {
       elements.push(<hr key={nextKey()} style={{ border: "none", borderTop: "1px solid #e8e8e8", margin: "16px 0" }} />);
       i++; continue;
     }
-
     if (/^\|.+\|/.test(line)) {
       const tableLines = [];
       while (i < lines.length && /^\|/.test(lines[i])) { tableLines.push(lines[i]); i++; }
@@ -84,38 +127,23 @@ function renderMarkdown(md, onCheckboxToggle) {
       if (rows.length > 0) {
         const parseRow = (r) => r.split("|").filter((_, idx, arr) => idx > 0 && idx < arr.length - 1).map(c => c.trim());
         const headers = parseRow(rows[0]);
-        const body    = rows.slice(1);
+        const body = rows.slice(1);
         elements.push(
           <div key={nextKey()} style={{ overflowX: "auto", margin: "12px 0" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: "#f5f6f8" }}>
-                  {headers.map((h, j) => (
-                    <th key={j} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, color: "#333", borderBottom: "2px solid #e0e0e0", whiteSpace: "nowrap" }}>{inlineFormat(h)}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {body.map((row, ri) => (
-                  <tr key={ri} style={{ borderBottom: "1px solid #f0f0f0", background: ri % 2 === 0 ? "#fff" : "#fafafa" }}>
-                    {parseRow(row).map((cell, ci) => (
-                      <td key={ci} style={{ padding: "7px 12px", color: "#444", verticalAlign: "top" }}>{inlineFormat(cell)}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
+              <thead><tr style={{ background: "#f5f6f8" }}>{headers.map((h, j) => <th key={j} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, color: "#333", borderBottom: "2px solid #e0e0e0", whiteSpace: "nowrap" }}>{inlineFormat(h)}</th>)}</tr></thead>
+              <tbody>{body.map((row, ri) => <tr key={ri} style={{ borderBottom: "1px solid #f0f0f0", background: ri % 2 === 0 ? "#fff" : "#fafafa" }}>{parseRow(row).map((cell, ci) => <td key={ci} style={{ padding: "7px 12px", color: "#444", verticalAlign: "top" }}>{inlineFormat(cell)}</td>)}</tr>)}</tbody>
             </table>
           </div>
         );
       }
       continue;
     }
-
     if (/^- \[[ x]\]/.test(line)) {
       const checkItems = [];
       while (i < lines.length && /^- \[[ x]\]/.test(lines[i])) {
         const checked = /^- \[x\]/.test(lines[i]);
-        const text    = lines[i].replace(/^- \[[ x]\] /, "");
+        const text = lines[i].replace(/^- \[[ x]\] /, "");
         checkItems.push({ checked, text, lineIdx: i });
         i++;
       }
@@ -123,83 +151,57 @@ function renderMarkdown(md, onCheckboxToggle) {
         <div key={nextKey()} style={{ margin: "8px 0", display: "flex", flexDirection: "column", gap: 5 }}>
           {checkItems.map((item, j) => (
             <label key={j} style={{ display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer", padding: "5px 8px", borderRadius: 6, background: item.checked ? "#00AA4408" : "transparent" }}>
-              <input type="checkbox" defaultChecked={item.checked} onChange={e => onCheckboxToggle && onCheckboxToggle(item.lineIdx, e.target.checked)}
-                style={{ marginTop: 2, accentColor: "#00AA44", width: 14, height: 14, cursor: "pointer", flexShrink: 0 }} />
-              <span style={{ fontSize: 13, color: item.checked ? "#aaa" : "#333", textDecoration: item.checked ? "line-through" : "none", lineHeight: 1.6 }}>
-                {inlineFormat(item.text)}
-              </span>
+              <input type="checkbox" defaultChecked={item.checked} onChange={e => onCheckboxToggle && onCheckboxToggle(item.lineIdx, e.target.checked)} style={{ marginTop: 2, accentColor: "#00AA44", width: 14, height: 14, cursor: "pointer", flexShrink: 0 }} />
+              <span style={{ fontSize: 13, color: item.checked ? "#aaa" : "#333", textDecoration: item.checked ? "line-through" : "none", lineHeight: 1.6 }}>{inlineFormat(item.text)}</span>
             </label>
           ))}
         </div>
       );
       continue;
     }
-
     if (/^[-*] /.test(line)) {
       const items = [];
       while (i < lines.length && /^[-*] /.test(lines[i])) { items.push(lines[i].replace(/^[-*] /, "")); i++; }
-      elements.push(
-        <ul key={nextKey()} style={{ margin: "6px 0", padding: "0 0 0 20px", display: "flex", flexDirection: "column", gap: 4 }}>
-          {items.map((item, j) => <li key={j} style={{ fontSize: 13, color: "#444", lineHeight: 1.7 }}>{inlineFormat(item)}</li>)}
-        </ul>
-      );
+      elements.push(<ul key={nextKey()} style={{ margin: "6px 0", padding: "0 0 0 20px", display: "flex", flexDirection: "column", gap: 4 }}>{items.map((item, j) => <li key={j} style={{ fontSize: 13, color: "#444", lineHeight: 1.7 }}>{inlineFormat(item)}</li>)}</ul>);
       continue;
     }
-
     if (/^\d+\. /.test(line)) {
       const items = [];
       while (i < lines.length && /^\d+\. /.test(lines[i])) { items.push(lines[i].replace(/^\d+\. /, "")); i++; }
-      elements.push(
-        <ol key={nextKey()} style={{ margin: "6px 0", padding: "0 0 0 20px", display: "flex", flexDirection: "column", gap: 4 }}>
-          {items.map((item, j) => <li key={j} style={{ fontSize: 13, color: "#444", lineHeight: 1.7 }}>{inlineFormat(item)}</li>)}
-        </ol>
-      );
+      elements.push(<ol key={nextKey()} style={{ margin: "6px 0", padding: "0 0 0 20px", display: "flex", flexDirection: "column", gap: 4 }}>{items.map((item, j) => <li key={j} style={{ fontSize: 13, color: "#444", lineHeight: 1.7 }}>{inlineFormat(item)}</li>)}</ol>);
       continue;
     }
-
     if (/^```/.test(line)) {
       const codeLines = [];
       i++;
       while (i < lines.length && !/^```/.test(lines[i])) { codeLines.push(lines[i]); i++; }
       i++;
-      elements.push(
-        <pre key={nextKey()} style={{ background: "#1a1a2a", color: "#e8e8e8", padding: "14px 18px", borderRadius: 8, fontSize: 12, fontFamily: "monospace", overflow: "auto", margin: "10px 0", lineHeight: 1.7 }}>
-          {codeLines.join("\n")}
-        </pre>
-      );
+      elements.push(<pre key={nextKey()} style={{ background: "#1a1a2a", color: "#e8e8e8", padding: "14px 18px", borderRadius: 8, fontSize: 12, fontFamily: "monospace", overflow: "auto", margin: "10px 0", lineHeight: 1.7 }}>{codeLines.join("\n")}</pre>);
       continue;
     }
-
     if (/^> /.test(line)) {
       const qLines = [];
       while (i < lines.length && /^> /.test(lines[i])) { qLines.push(lines[i].replace(/^> /, "")); i++; }
-      elements.push(
-        <blockquote key={nextKey()} style={{ borderLeft: "4px solid #0066FF", margin: "10px 0", padding: "8px 16px", background: "#0066FF06", borderRadius: "0 8px 8px 0" }}>
-          {qLines.map((l, j) => <p key={j} style={{ margin: 0, fontSize: 13, color: "#555", fontStyle: "italic", lineHeight: 1.7 }}>{inlineFormat(l)}</p>)}
-        </blockquote>
-      );
+      elements.push(<blockquote key={nextKey()} style={{ borderLeft: "4px solid #0066FF", margin: "10px 0", padding: "8px 16px", background: "#0066FF06", borderRadius: "0 8px 8px 0" }}>{qLines.map((l, j) => <p key={j} style={{ margin: 0, fontSize: 13, color: "#555", fontStyle: "italic", lineHeight: 1.7 }}>{inlineFormat(l)}</p>)}</blockquote>);
       continue;
     }
-
     if (!line.trim()) { elements.push(<div key={nextKey()} style={{ height: 6 }} />); i++; continue; }
-
     elements.push(<p key={nextKey()} style={{ margin: "2px 0", fontSize: 13, color: "#444", lineHeight: 1.8 }}>{inlineFormat(line)}</p>);
     i++;
   }
-
   return elements;
 }
 
 // ── Doc viewer ────────────────────────────────────────────────────────────────
 
-function DocViewer({ doc, onSave, onDelete, onNew }) {
-  const [editMode, setEditMode]   = useState(false);
-  const [title, setTitle]         = useState(doc.title);
-  const [content, setContent]     = useState(doc.content);
-  const [saving, setSaving]       = useState(false);
-  const [saved, setSaved]         = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const textareaRef               = useRef(null);
+function DocViewer({ doc, onSave, onDelete }) {
+  const [editMode,   setEditMode]   = useState(false);
+  const [title,      setTitle]      = useState(doc.title);
+  const [content,    setContent]    = useState(doc.content);
+  const [saving,     setSaving]     = useState(false);
+  const [saved,      setSaved]      = useState(false);
+  const [exporting,  setExporting]  = useState(false);
+  const textareaRef                 = useRef(null);
 
   useEffect(() => { setTitle(doc.title); setContent(doc.content); setEditMode(false); }, [doc.id]);
 
@@ -227,9 +229,7 @@ function DocViewer({ doc, onSave, onDelete, onNew }) {
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement("a");
-      a.href     = url;
-      a.download = title.replace(/[^a-z0-9]/gi, "_").toLowerCase() + ".docx";
-      a.click();
+      a.href = url; a.download = title.replace(/[^a-z0-9]/gi, "_").toLowerCase() + ".docx"; a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
       alert("Export failed: " + e.message);
@@ -250,24 +250,19 @@ function DocViewer({ doc, onSave, onDelete, onNew }) {
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
           {editMode ? (
             <>
-              <button onClick={() => { setTitle(doc.title); setContent(doc.content); setEditMode(false); }}
-                style={{ padding: "5px 12px", borderRadius: 6, fontSize: 12, background: "#f5f6f8", border: "1px solid #e0e0e0", color: "#888", cursor: "pointer" }}>Cancel</button>
-              <button onClick={handleSave} disabled={saving}
-                style={{ padding: "5px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, background: saving ? "#ccc" : "#0066FF", border: "none", color: "#fff", cursor: saving ? "not-allowed" : "pointer" }}>
+              <button onClick={() => { setTitle(doc.title); setContent(doc.content); setEditMode(false); }} style={{ padding: "5px 12px", borderRadius: 6, fontSize: 12, background: "#f5f6f8", border: "1px solid #e0e0e0", color: "#888", cursor: "pointer" }}>Cancel</button>
+              <button onClick={handleSave} disabled={saving} style={{ padding: "5px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700, background: saving ? "#ccc" : "#0066FF", border: "none", color: "#fff", cursor: saving ? "not-allowed" : "pointer" }}>
                 {saving ? "Saving..." : "Save"}
               </button>
             </>
           ) : (
             <>
               {saved && <span style={{ fontSize: 11, color: "#00AA44", fontFamily: "monospace" }}>Saved</span>}
-              <button onClick={() => setEditMode(true)}
-                style={{ padding: "5px 12px", borderRadius: 6, fontSize: 12, background: "#f5f6f8", border: "1px solid #e0e0e0", color: "#555", cursor: "pointer" }}>Edit</button>
-              <button onClick={handleExportDocx} disabled={exporting}
-                style={{ padding: "5px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: "#1a1a2a", border: "none", color: "#fff", cursor: exporting ? "not-allowed" : "pointer" }}>
+              <button onClick={() => setEditMode(true)} style={{ padding: "5px 12px", borderRadius: 6, fontSize: 12, background: "#f5f6f8", border: "1px solid #e0e0e0", color: "#555", cursor: "pointer" }}>Edit</button>
+              <button onClick={handleExportDocx} disabled={exporting} style={{ padding: "5px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, background: "#1a1a2a", border: "none", color: "#fff", cursor: exporting ? "not-allowed" : "pointer" }}>
                 {exporting ? "Exporting..." : "⬇ Download .docx"}
               </button>
-              <button onClick={() => { if (confirm("Delete this doc?")) onDelete(doc.id); }}
-                style={{ padding: "5px 10px", borderRadius: 6, fontSize: 12, background: "none", border: "1px solid #FF444422", color: "#FF4444", cursor: "pointer" }}>Delete</button>
+              <button onClick={() => { if (confirm("Delete this doc?")) onDelete(doc.id); }} style={{ padding: "5px 10px", borderRadius: 6, fontSize: 12, background: "none", border: "1px solid #FF444422", color: "#FF4444", cursor: "pointer" }}>Delete</button>
             </>
           )}
         </div>
@@ -308,8 +303,8 @@ function PromptInput({ onGenerate, generating, activeProject, activeFeature }) {
         <div style={{ fontSize: 22, fontWeight: 800, color: "#1a1a2a", marginBottom: 6 }}>New Document</div>
         <div style={{ fontSize: 13, color: "#aaa", marginBottom: 28 }}>
           {activeProject
-            ? <>Context loaded from <strong style={{ color: "#0066FF" }}>{activeProject.name}</strong>{activeFeature ? <> / <strong style={{ color: "#00AA44" }}>{activeFeature.name}</strong></> : ""}</>
-            : "Select a project to include its context in the document"}
+            ? <>Context loaded from <strong style={{ color: "#0066FF" }}>{activeProject.name}</strong>{activeFeature ? <> › <strong style={{ color: "#00AA44" }}>{activeFeature.name}</strong></> : ""}</>
+            : "Select a project above to include its context in the document"}
         </div>
         <div style={{ background: "#fff", border: "1.5px solid #e0e0e0", borderRadius: 14, overflow: "hidden", boxShadow: "0 4px 20px rgba(0,0,0,0.06)" }}
           onFocusCapture={e => e.currentTarget.style.borderColor = "#0066FF"}
@@ -328,7 +323,7 @@ function PromptInput({ onGenerate, generating, activeProject, activeFeature }) {
         </div>
         {!activeProject && (
           <div style={{ marginTop: 10, padding: "9px 14px", background: "#FF880008", border: "1px solid #FF880022", borderRadius: 8, fontSize: 12, color: "#FF8800" }}>
-            Select a project from the sidebar first — the doc will be grounded in your project context.
+            Select a project above — the doc will be grounded in your project context.
           </div>
         )}
       </div>
@@ -353,8 +348,6 @@ function PromptInput({ onGenerate, generating, activeProject, activeFeature }) {
   );
 }
 
-// ── Generating spinner ────────────────────────────────────────────────────────
-
 function GeneratingView({ prompt }) {
   const [dots, setDots] = useState(".");
   useEffect(() => {
@@ -373,35 +366,52 @@ function GeneratingView({ prompt }) {
 
 // ── Main module ───────────────────────────────────────────────────────────────
 
+function timeAgo(d) {
+  const s = Math.floor((Date.now() - new Date(d)) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
 export default function Docs({ ps }) {
-  const { activeProject, activeFeature } = ps;
+  const { activeProject, activeFeature, projects, features, loadProject } = ps;
 
-  const [docs, setDocs]                         = useState([]);
-  const [activeDoc, setActiveDoc]               = useState(null);
-  const [generating, setGenerating]             = useState(false);
-  const [generatingPrompt, setGeneratingPrompt] = useState("");
-  const [view, setView]                         = useState("new");
-  const [loadingDocs, setLoadingDocs]           = useState(false);
+  // Local context override — switch project/feature without affecting sidebar
+  const [localProject, setLocalProject] = useState(activeProject);
+  const [localFeature, setLocalFeature] = useState(activeFeature);
 
+  // Sync from sidebar when it changes
+  useEffect(() => { if (activeProject && !localProject) setLocalProject(activeProject); }, [activeProject]);
+  useEffect(() => { if (activeFeature && !localFeature) setLocalFeature(activeFeature); }, [activeFeature]);
+
+  const [docs,             setDocs]             = useState([]);
+  const [activeDoc,        setActiveDoc]         = useState(null);
+  const [generating,       setGenerating]        = useState(false);
+  const [generatingPrompt, setGeneratingPrompt]  = useState("");
+  const [view,             setView]              = useState("new");
+  const [loadingDocs,      setLoadingDocs]       = useState(false);
+
+  // Reload docs when local project changes
   useEffect(() => {
-    if (!activeProject) { setDocs([]); setActiveDoc(null); setView("new"); return; }
+    if (!localProject) { setDocs([]); setActiveDoc(null); setView("new"); return; }
     setLoadingDocs(true);
-    apiFetch("/projects/" + activeProject.id + "/docs")
+    apiFetch("/projects/" + localProject.id + "/docs")
       .then(r => r.json())
       .then(data => setDocs(data))
       .catch(console.error)
       .finally(() => setLoadingDocs(false));
-  }, [activeProject?.id]);
+  }, [localProject?.id]);
 
   const handleGenerate = async (prompt) => {
-    if (!activeProject) return;
+    if (!localProject) return;
     setGenerating(true);
     setGeneratingPrompt(prompt);
     setView("generating");
     try {
-      const res = await apiFetch("/projects/" + activeProject.id + "/docs/generate", {
+      const res = await apiFetch("/projects/" + localProject.id + "/docs/generate", {
         method: "POST",
-        body: JSON.stringify({ prompt, featureId: activeFeature?.id }),
+        body: JSON.stringify({ prompt, featureId: localFeature?.id }),
       });
       const doc = await res.json();
       if (doc.error) throw new Error(doc.error);
@@ -425,10 +435,7 @@ export default function Docs({ ps }) {
   };
 
   const handleSave = async (id, title, content) => {
-    await apiFetch("/docs/" + id, {
-      method: "PATCH",
-      body: JSON.stringify({ title, content }),
-    });
+    await apiFetch("/docs/" + id, { method: "PATCH", body: JSON.stringify({ title, content }) });
     setDocs(prev => prev.map(d => d.id === id ? { ...d, title } : d));
     if (activeDoc?.id === id) setActiveDoc(prev => ({ ...prev, title, content }));
   };
@@ -440,43 +447,49 @@ export default function Docs({ ps }) {
     setView("new");
   };
 
-  function timeAgo(d) {
-    const s = Math.floor((Date.now() - new Date(d)) / 1000);
-    if (s < 60) return "just now";
-    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-    return `${Math.floor(s / 86400)}d ago`;
-  }
-
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 48px)", overflow: "hidden", background: "#f5f6f8" }}>
-      <div style={{ width: 240, background: "#fff", borderRight: "1px solid #f0f0f0", display: "flex", flexDirection: "column", flexShrink: 0 }}>
-        <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #f5f5f5", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1a2a" }}>Documents</div>
-          <button onClick={() => { setActiveDoc(null); setView("new"); }}
-            style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, background: "#0066FF", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer" }}>+ New</button>
-        </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "8px" }}>
-          {!activeProject && <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: "20px 12px", lineHeight: 1.7 }}>Select a project to see its documents</div>}
-          {activeProject && loadingDocs && <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: 20 }}>Loading...</div>}
-          {activeProject && !loadingDocs && docs.length === 0 && <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: "20px 12px", lineHeight: 1.7, fontStyle: "italic" }}>No documents yet. Generate your first one.</div>}
-          {docs.map(doc => (
-            <div key={doc.id} onClick={() => handleOpenDoc(doc)}
-              style={{ padding: "10px 12px", borderRadius: 8, marginBottom: 2, cursor: "pointer", background: activeDoc?.id === doc.id ? "#0066FF0d" : "transparent", border: `1px solid ${activeDoc?.id === doc.id ? "#0066FF22" : "transparent"}` }}
-              onMouseEnter={e => { if (activeDoc?.id !== doc.id) e.currentTarget.style.background = "#f5f6f8"; }}
-              onMouseLeave={e => { if (activeDoc?.id !== doc.id) e.currentTarget.style.background = "transparent"; }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: activeDoc?.id === doc.id ? "#0066FF" : "#1a1a2a", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📄 {doc.title}</div>
-              {doc.preview && <div style={{ fontSize: 11, color: "#aaa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.preview.replace(/[#*`>]/g, "").trim().slice(0, 60)}</div>}
-              <div style={{ fontSize: 10, color: "#ccc", marginTop: 3, fontFamily: "monospace" }}>{timeAgo(doc.updated_at)}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 48px)", overflow: "hidden", background: "#f5f6f8" }}>
 
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        {view === "new"        && <div style={{ flex: 1, overflow: "auto" }}><PromptInput onGenerate={handleGenerate} generating={generating} activeProject={activeProject} activeFeature={activeFeature} /></div>}
-        {view === "generating" && <GeneratingView prompt={generatingPrompt} />}
-        {view === "doc"        && activeDoc && <DocViewer doc={activeDoc} onSave={handleSave} onDelete={handleDelete} onNew={() => { setActiveDoc(null); setView("new"); }} />}
+      {/* Context selector */}
+      <ContextSelector
+        ps={ps}
+        selectedProject={localProject}
+        selectedFeature={localFeature}
+        onProjectChange={setLocalProject}
+        onFeatureChange={setLocalFeature}
+      />
+
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* Doc list sidebar */}
+        <div style={{ width: 240, background: "#fff", borderRight: "1px solid #f0f0f0", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+          <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #f5f5f5", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#1a1a2a" }}>Documents</div>
+            <button onClick={() => { setActiveDoc(null); setView("new"); }}
+              style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, background: "#0066FF", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer" }}>+ New</button>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: "8px" }}>
+            {!localProject && <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: "20px 12px", lineHeight: 1.7 }}>Select a project above to see its documents</div>}
+            {localProject && loadingDocs && <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: 20 }}>Loading...</div>}
+            {localProject && !loadingDocs && docs.length === 0 && <div style={{ fontSize: 11, color: "#ccc", textAlign: "center", padding: "20px 12px", lineHeight: 1.7, fontStyle: "italic" }}>No documents yet. Generate your first one.</div>}
+            {docs.map(doc => (
+              <div key={doc.id} onClick={() => handleOpenDoc(doc)}
+                style={{ padding: "10px 12px", borderRadius: 8, marginBottom: 2, cursor: "pointer", background: activeDoc?.id === doc.id ? "#0066FF0d" : "transparent", border: `1px solid ${activeDoc?.id === doc.id ? "#0066FF22" : "transparent"}` }}
+                onMouseEnter={e => { if (activeDoc?.id !== doc.id) e.currentTarget.style.background = "#f5f6f8"; }}
+                onMouseLeave={e => { if (activeDoc?.id !== doc.id) e.currentTarget.style.background = "transparent"; }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: activeDoc?.id === doc.id ? "#0066FF" : "#1a1a2a", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📄 {doc.title}</div>
+                {doc.preview && <div style={{ fontSize: 11, color: "#aaa", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.preview.replace(/[#*`>]/g, "").trim().slice(0, 60)}</div>}
+                <div style={{ fontSize: 10, color: "#ccc", marginTop: 3, fontFamily: "monospace" }}>{timeAgo(doc.updated_at)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Doc content area */}
+        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          {view === "new"        && <div style={{ flex: 1, overflow: "auto" }}><PromptInput onGenerate={handleGenerate} generating={generating} activeProject={localProject} activeFeature={localFeature} /></div>}
+          {view === "generating" && <GeneratingView prompt={generatingPrompt} />}
+          {view === "doc"        && activeDoc && <DocViewer doc={activeDoc} onSave={handleSave} onDelete={handleDelete} onNew={() => { setActiveDoc(null); setView("new"); }} />}
+        </div>
       </div>
     </div>
   );

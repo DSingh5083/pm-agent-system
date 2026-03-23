@@ -5,7 +5,7 @@
 import { usePMPipeline } from "../PMPipelineContext.jsx";
 import StageCard, { SectionHeader } from "../StageCard/index.jsx";
 import FeatureDescriptionInput from "./FeatureDescriptionInput.jsx";
-import { FEATURE_STAGES, API } from "../constants.js";
+import { FEATURE_STAGES } from "../constants.js";
 
 export default function FeatureView() {
   const {
@@ -64,6 +64,7 @@ export default function FeatureView() {
         </div>
       )}
 
+      {/* Feature stages — paths only, no API prefix (apiClient prepends base URL) */}
       {FEATURE_STAGES.map(stage => (
         <StageCard
           key={activeFeature.id + "-" + stage.id}
@@ -71,8 +72,8 @@ export default function FeatureView() {
           result={currentFeatureOutputs[stage.id] !== undefined ? currentFeatureOutputs[stage.id] : null}
           loading={false}
           descriptionMissing={featureDescriptionMissing}
-          interviewEndpoint={API + "/features/" + activeFeature.id + "/interview/" + stage.id}
-          runEndpoint={API + "/features/" + activeFeature.id + "/run/" + stage.id}
+          interviewEndpoint={"/features/" + activeFeature.id + "/interview/" + stage.id}
+          runEndpoint={"/features/" + activeFeature.id + "/run/" + stage.id}
           onResult={(result) => saveFeatureOutput(activeFeature.id, stage.id, result)}
           projectName={activeProject.name}
           featureName={activeFeature.name}

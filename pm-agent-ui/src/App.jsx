@@ -5,18 +5,19 @@
 import { useState } from "react";
 import AuthGate from "./components/AuthGate.jsx";
 import { useProjects } from "./lib/useProject.js";
-import PMPipeline      from "./modules/PMPipeline/index.jsx";
-import PMChat          from "./modules/PMChat/index.jsx";
-import WritingEnhancer from "./modules/WritingEnhancer/index.jsx";
-import Docs            from "./modules/Docs/index.jsx";
-import Features        from "./modules/Features/index.jsx";
+import PMPipeline from "./modules/PMPipeline/index.jsx";
+import PMChat     from "./modules/PMChat/index.jsx";
+import Docs       from "./modules/Docs/index.jsx";
+import Features   from "./modules/Features/index.jsx";
+
+// Writing removed from top nav — Enhance Writing is now inline on stage cards,
+// Stakeholder Translator lives in the Features tab.
 
 const MODULES = [
   { id: "pipeline", label: "Pipeline",  icon: "⚡" },
+  { id: "features", label: "Features",  icon: "⚙️" },
   { id: "chat",     label: "Assistant", icon: "🧠" },
-  { id: "writing",  label: "Writing",   icon: "✍️" },
   { id: "docs",     label: "Docs",      icon: "📄" },
-  { id: "features",  label: "Features",  icon: "⚙️" },
 ];
 
 function timeAgo(d) {
@@ -32,12 +33,12 @@ function Sidebar({ ps, onNewProject, onFeatureSelect }) {
           loadProject, createProject, deleteProject,
           createFeature, deleteFeature, setActiveFeature } = ps;
 
-  const [creatingProject, setCreatingProject]   = useState(false);
-  const [creatingFeature, setCreatingFeature]   = useState(false);
-  const [newProjectName, setNewProjectName]     = useState("");
-  const [newFeatureName, setNewFeatureName]     = useState("");
-  const [confirmDelete, setConfirmDelete]       = useState(null);
-  const [hovered, setHovered]                   = useState(null);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [creatingFeature, setCreatingFeature] = useState(false);
+  const [newProjectName,  setNewProjectName]  = useState("");
+  const [newFeatureName,  setNewFeatureName]  = useState("");
+  const [confirmDelete,   setConfirmDelete]   = useState(null);
+  const [hovered,         setHovered]         = useState(null);
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
@@ -89,10 +90,8 @@ function Sidebar({ ps, onNewProject, onFeatureSelect }) {
         {projects.map(p => {
           const isActiveProject = activeProject?.id === p.id;
           const isHov = hovered === p.id;
-
           return (
             <div key={p.id}>
-              {/* Project row */}
               <div
                 onClick={() => { loadProject(p); setActiveFeature(null); }}
                 onMouseEnter={() => setHovered(p.id)}
@@ -106,7 +105,6 @@ function Sidebar({ ps, onNewProject, onFeatureSelect }) {
                   {p.feature_count > 0 && <span style={{ fontSize: 9, color: "#4d88ff", background: "#0066FF18", padding: "1px 5px", borderRadius: 8, fontFamily: "monospace" }}>{p.feature_count} features</span>}
                   <span style={{ fontSize: 9, color: "#ffffff22", marginLeft: "auto" }}>{timeAgo(p.updated_at)}</span>
                 </div>
-                {/* Delete project */}
                 {confirmDelete === p.id ? (
                   <div onClick={e => e.stopPropagation()} style={{ position: "absolute", right: 4, top: 6, display: "flex", gap: 3 }}>
                     <button onClick={() => { deleteProject(p.id); setConfirmDelete(null); }} style={{ fontSize: 9, padding: "2px 5px", background: "#FF4444", border: "none", borderRadius: 3, color: "#fff", cursor: "pointer", fontWeight: 700 }}>Del</button>
@@ -117,15 +115,13 @@ function Sidebar({ ps, onNewProject, onFeatureSelect }) {
                 )}
               </div>
 
-              {/* Features under active project */}
               {isActiveProject && (
                 <div style={{ marginLeft: 12, marginBottom: 4 }}>
                   {features.map(f => {
                     const isFActive = activeFeature?.id === f.id;
                     const isFHov = hovered === f.id;
                     return (
-                      <div
-                        key={f.id}
+                      <div key={f.id}
                         onClick={() => { setActiveFeature(f); if (onFeatureSelect) onFeatureSelect(f); }}
                         onMouseEnter={() => setHovered(f.id)}
                         onMouseLeave={() => setHovered(null)}
@@ -149,7 +145,6 @@ function Sidebar({ ps, onNewProject, onFeatureSelect }) {
                     );
                   })}
 
-                  {/* Add feature */}
                   {creatingFeature ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "4px 2px" }}>
                       <input autoFocus value={newFeatureName} onChange={e => setNewFeatureName(e.target.value)}
@@ -186,64 +181,63 @@ function Sidebar({ ps, onNewProject, onFeatureSelect }) {
 }
 
 export default function App() {
-  const [activeModule, setActiveModule]         = useState("pipeline");
+  const [activeModule,    setActiveModule]    = useState("pipeline");
   const [discoveryProject, setDiscoveryProject] = useState(null);
-  const [prevModule,    setPrevModule]    = useState("pipeline");
+  const [prevModule,      setPrevModule]      = useState("pipeline");
   const ps = useProjects();
 
   return (
     <AuthGate>
-    <div style={{ display: "flex", height: "100vh", width: "100vw", overflow: "hidden", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      <Sidebar ps={ps}
-        onNewProject={(p) => { setActiveModule("pipeline"); setDiscoveryProject(p); }}
-        onFeatureSelect={() => { setPrevModule(activeModule); setActiveModule("features"); }}
-      />
+      <div style={{ display: "flex", height: "100vh", width: "100vw", overflow: "hidden", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+        <Sidebar
+          ps={ps}
+          onNewProject={(p) => { setActiveModule("pipeline"); setDiscoveryProject(p); }}
+          onFeatureSelect={() => { setPrevModule(activeModule); setActiveModule("features"); }}
+        />
 
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {/* Top nav */}
-        <div style={{ height: 48, background: "#fff", borderBottom: "1px solid #e8e8e8", display: "flex", alignItems: "center", padding: "0 20px", gap: 4, flexShrink: 0 }}>
-          {/* Breadcrumb */}
-          {ps.activeProject && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginRight: 16 }}>
-              <span
-                onClick={() => ps.setActiveFeature(null)}
-                style={{ fontSize: 12, color: ps.activeFeature ? "#888" : "#0066FF", background: ps.activeFeature ? "#f5f6f8" : "#0066FF0d", padding: "3px 10px", borderRadius: 20, fontWeight: 600, cursor: ps.activeFeature ? "pointer" : "default" }}
-              >
-                {ps.activeProject.name}
-              </span>
-              {ps.activeFeature && (
-                <>
-                  <span style={{ color: "#ccc", fontSize: 12 }}>›</span>
-                  <span style={{ fontSize: 12, color: "#00AA44", background: "#00AA4410", padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>
-                    {ps.activeFeature.name}
-                  </span>
-                </>
-              )}
-            </div>
-          )}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          {/* Top nav */}
+          <div style={{ height: 48, background: "#fff", borderBottom: "1px solid #e8e8e8", display: "flex", alignItems: "center", padding: "0 20px", gap: 4, flexShrink: 0 }}>
+            {ps.activeProject && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginRight: 16 }}>
+                <span
+                  onClick={() => ps.setActiveFeature(null)}
+                  style={{ fontSize: 12, color: ps.activeFeature ? "#888" : "#0066FF", background: ps.activeFeature ? "#f5f6f8" : "#0066FF0d", padding: "3px 10px", borderRadius: 20, fontWeight: 600, cursor: ps.activeFeature ? "pointer" : "default" }}
+                >
+                  {ps.activeProject.name}
+                </span>
+                {ps.activeFeature && (
+                  <>
+                    <span style={{ color: "#ccc", fontSize: 12 }}>›</span>
+                    <span style={{ fontSize: 12, color: "#00AA44", background: "#00AA4410", padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>
+                      {ps.activeFeature.name}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
 
-          {/* Module tabs */}
-          {MODULES.map(m => (
-            <button key={m.id} onClick={() => setActiveModule(m.id)} style={{ padding: "5px 14px", borderRadius: 8, fontSize: 13, cursor: "pointer", background: activeModule === m.id ? "#1a1a2a" : "transparent", color: activeModule === m.id ? "#fff" : "#666", border: "none", fontWeight: activeModule === m.id ? 600 : 400, transition: "all 0.15s" }}>
-              {m.icon} {m.label}
-            </button>
-          ))}
+            {MODULES.map(m => (
+              <button key={m.id} onClick={() => setActiveModule(m.id)}
+                style={{ padding: "5px 14px", borderRadius: 8, fontSize: 13, cursor: "pointer", background: activeModule === m.id ? "#1a1a2a" : "transparent", color: activeModule === m.id ? "#fff" : "#666", border: "none", fontWeight: activeModule === m.id ? 600 : 400, transition: "all 0.15s" }}>
+                {m.icon} {m.label}
+              </button>
+            ))}
 
-          {!ps.activeProject && !ps.loading && (
-            <span style={{ marginLeft: "auto", fontSize: 12, color: "#FF8800" }}>⚠️ Create a project to get started</span>
-          )}
-        </div>
+            {!ps.activeProject && !ps.loading && (
+              <span style={{ marginLeft: "auto", fontSize: 12, color: "#FF8800" }}>⚠️ Create a project to get started</span>
+            )}
+          </div>
 
-        {/* Module */}
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          {activeModule === "pipeline" && <PMPipeline ps={ps} discoveryProject={discoveryProject} onDiscoveryDone={() => setDiscoveryProject(null)} />}
-          {activeModule === "chat"     && <PMChat     ps={ps} />}
-          {activeModule === "writing"  && <WritingEnhancer />}
-          {activeModule === "docs"      && <Docs ps={ps} />}
-          {activeModule === "features"  && <Features ps={ps} onGoToPipeline={() => { setActiveModule(prevModule || "pipeline"); ps.setActiveFeature(null); }} />}
+          {/* Module content */}
+          <div style={{ flex: 1, overflow: "hidden" }}>
+            {activeModule === "pipeline" && <PMPipeline ps={ps} discoveryProject={discoveryProject} onDiscoveryDone={() => setDiscoveryProject(null)} />}
+            {activeModule === "features" && <Features   ps={ps} onGoToPipeline={() => { setActiveModule(prevModule || "pipeline"); ps.setActiveFeature(null); }} />}
+            {activeModule === "chat"     && <PMChat     ps={ps} />}
+            {activeModule === "docs"     && <Docs       ps={ps} />}
+          </div>
         </div>
       </div>
-    </div>
     </AuthGate>
   );
 }
