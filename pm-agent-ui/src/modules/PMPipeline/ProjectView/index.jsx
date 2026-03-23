@@ -6,7 +6,7 @@ import { usePMPipeline } from "../PMPipelineContext.jsx";
 import StageCard, { SectionHeader } from "../StageCard/index.jsx";
 import ProjectBrief     from "./ProjectBrief.jsx";
 import ConstraintsPanel from "./ConstraintsPanel.jsx";
-import { PROJECT_STAGES, API } from "../constants.js";
+import { PROJECT_STAGES } from "../constants.js";
 
 export default function ProjectView() {
   const {
@@ -52,8 +52,8 @@ export default function ProjectView() {
           result={projectOutputs[stage.id] !== undefined ? projectOutputs[stage.id] : null}
           loading={false}
           descriptionMissing={projectDescriptionMissing}
-          interviewEndpoint={API + "/projects/" + activeProject.id + "/interview/" + stage.id}
-          runEndpoint={API + "/projects/" + activeProject.id + "/run/" + stage.id}
+          interviewEndpoint={"/projects/" + activeProject.id + "/interview/" + stage.id}
+          runEndpoint={"/projects/" + activeProject.id + "/run/" + stage.id}
           onResult={(result) => saveProjectOutput(stage.id, result)}
           projectName={activeProject.name}
         />
