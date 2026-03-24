@@ -5,7 +5,7 @@ import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import pkg from "@notionhq/client";
-const { Client: NotionClient } = pkg;
+const NotionClient = pkg.default ? pkg.default.Client : pkg.Client;
 import { initDb, projectsDb, constraintsDb, projectOutputsDb, featuresDb, featureOutputsDb, chatDb, docsDb, pool } from "./db.js";
 import { embedStageOutput, embedProjectBrief, embedFeature, embedUIDescription, retrieveMemory } from "./embeddings.js";
 dotenv.config();
@@ -226,17 +226,19 @@ function estimateTokens(str) { return Math.ceil((str || "").length / 4); }
 
 const META_KEYS = new Set(["projectName","projectDescription","featureName","featureDescription","constraints","briefing","interviewAnswers","ragMemory"]);
 const STAGE_NEEDS = {
-  competitor:      [],
-  market_analysis: ["competitor"],
-  roadmap:         ["competitor", "market_analysis"],
-  gtm:             ["competitor", "market_analysis", "roadmap"],
-  prd:             ["competitor", "market_analysis"],
-  architecture:    ["prd"],
-  flow:            ["prd", "architecture"],
-  ui_spec:         ["prd", "flow"],
-  diagram:         ["architecture", "flow"],
-  review:          ["prd", "architecture", "flow", "ui_spec"],
-  tickets:         ["prd", "architecture", "review"],
+  competitor:        [],
+  market_analysis:   ["competitor"],
+  feature_ideation:  ["competitor", "market_analysis"],
+  decision_log:      ["competitor", "market_analysis", "feature_ideation"],
+  roadmap:           ["feature_ideation", "decision_log"],
+  gtm:               ["competitor", "market_analysis", "roadmap"],
+  prd:               ["competitor", "market_analysis", "decision_log"],
+  architecture:      ["prd"],
+  flow:              ["prd", "architecture"],
+  ui_spec:           ["prd", "flow"],
+  diagram:           ["architecture", "flow"],
+  review:            ["prd", "architecture", "flow", "ui_spec"],
+  tickets:           ["prd", "architecture", "review"],
 };
 
 function buildContextBlock(ctx, stageId) {
@@ -437,7 +439,7 @@ app.post("/notion/push", async (req, res) => {
         and: [
           { property: "Project", rich_text: { equals: projectName || "" } },
           { property: "Feature", rich_text: { equals: featureName || "" } },
-          { property: "Stage",   multi_select: { contains: stageLabel || stageId } },
+          { property: "Stage",   select:    { equals: stageLabel  || stageId } },
         ],
       },
     });
@@ -449,30 +451,24 @@ app.post("/notion/push", async (req, res) => {
       const existing = await notionClient.blocks.children.list({ block_id: pageId });
       await Promise.all(existing.results.map(b => notionClient.blocks.delete({ block_id: b.id })));
       await notionClient.blocks.children.append({ block_id: pageId, children: blocks });
-      // Only update Last Synced if that column exists in your DB
-      // await notionClient.pages.update({
-      //   page_id: pageId,
-      //   properties: { "Last Synced": { date: { start: now } } },
-      // });
+      await notionClient.pages.update({
+        page_id: pageId,
+        properties: { "Last Synced": { date: { start: now } } },
+      });
       res.json({ ok: true, action: "updated", pageId, url: search.results[0].url });
     } else {
-      // Build properties using only confirmed DB columns
-      const createProperties = {
-        Name:    { title:     [{ text: { content: `${stageLabel || stageId} — ${featureName || projectName}` } }] },
-        Project: { rich_text: [{ text: { content: projectName || "" } }] },
-        Feature: { rich_text: [{ text: { content: featureName || "" } }] },
-        Status:  { multi_select: [{ name: "Draft" }] },
-      };
-      // Add Stage only if the column exists in your DB
-      if (stageLabel || stageId) createProperties["Stage"] = { multi_select: [{ name: stageLabel || stageId }] };
-      // Uncomment if you have a Last Synced date field:
-      // createProperties["Last Synced"] = { date: { start: now } };
-
       const page = await notionClient.pages.create({
         parent:     { database_id: NOTION_DATABASE_ID },
         icon:       { type: "emoji", emoji: stageEmoji(stageId) },
-        properties: createProperties,
-        children:   blocks,
+        properties: {
+          Name:          { title:     [{ text: { content: `${stageLabel || stageId} — ${featureName || projectName}` } }] },
+          Project:       { rich_text: [{ text: { content: projectName || "" } }] },
+          Feature:       { rich_text: [{ text: { content: featureName || "" } }] },
+          Stage:         { select:    { name: stageLabel || stageId } },
+          Status:        { select:    { name: "Draft" } },
+          "Last Synced": { date:      { start: now } },
+        },
+        children: blocks,
       });
       res.json({ ok: true, action: "created", pageId: page.id, url: page.url });
     }
