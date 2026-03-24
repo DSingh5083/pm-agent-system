@@ -204,158 +204,182 @@ function ContextPanel({ activeProject, activeFeature, projectOutputs, featureOut
 
 // ── Main module ───────────────────────────────────────────────────────────────
 
-export default function PMChat({ ps }) {
-  const { activeProject, activeFeature, projectOutputs, featureOutputs, chatMessages, clearChat, setChatMessages } = ps;
+// ── Stakeholder config ────────────────────────────────────────────────────────
 
-  // Local override — user can switch context within Assistant without affecting sidebar
-  const [localProject, setLocalProject] = useState(activeProject);
-  const [localFeature, setLocalFeature] = useState(activeFeature);
+const STAKEHOLDERS = [
+  { id: "ceo",         label: "CEO",              icon: "👔", color: "#0066FF", focus: "Business impact, revenue, market opportunity, ROI and strategic value",                                format: "Executive summary — lead with business outcome, under 150 words, no technical jargon" },
+  { id: "tech-lead",   label: "Tech Lead",        icon: "🧑‍💻", color: "#8B00FF", focus: "Technical architecture, scalability, implementation approach, tech debt, engineering trade-offs",   format: "Technical and direct — include architecture considerations, risks, and suggested approach" },
+  { id: "ba",          label: "Business Analyst", icon: "📋", color: "#00AA44", focus: "Business cases, edge cases, functional requirements, acceptance criteria, user flows and exceptions", format: "Detailed and structured — list all cases, flows, and scenarios with numbered points" },
+  { id: "qa",          label: "QA Engineer",      icon: "🔬", color: "#FF8800", focus: "Test scenarios, edge cases, regression risks, acceptance criteria, what could break",                format: "Structured test thinking — list test cases, happy path, negative cases, edge scenarios" },
+  { id: "designer",    label: "Designer",         icon: "🎨", color: "#FF4444", focus: "User experience, UI requirements, user journey, interaction patterns, accessibility",                format: "UX-focused — describe user journey, key screens, interactions and design constraints" },
+  { id: "stakeholder", label: "Stakeholder",      icon: "🤝", color: "#555",    focus: "Project status, timeline, risks, dependencies and what decisions are needed from them",              format: "Clear update style — what is happening, why it matters, and what you need from them" },
+];
 
-  // Sync when sidebar selection changes (but don't override local if already set)
-  useEffect(() => { if (activeProject && !localProject) setLocalProject(activeProject); }, [activeProject]);
-  useEffect(() => { if (activeFeature && !localFeature) setLocalFeature(activeFeature); }, [activeFeature]);
+// ── Stakeholder card ──────────────────────────────────────────────────────────
 
-  const [input,   setInput]   = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
-  const bottomRef             = useRef(null);
-  const inputRef              = useRef(null);
+function StakeholderCard({ stakeholder, content, loading, canGenerate, onGenerate }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${stakeholder.color}22`, borderRadius: 12, overflow: "hidden", marginBottom: 12, borderLeft: `4px solid ${stakeholder.color}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: `${stakeholder.color}06`, borderBottom: (content || loading) ? `1px solid ${stakeholder.color}11` : "none" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 34, height: 34, borderRadius: "50%", background: `${stakeholder.color}15`, border: `1.5px solid ${stakeholder.color}33`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17 }}>{stakeholder.icon}</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a" }}>{stakeholder.label}</div>
+            <div style={{ fontSize: 11, color: "#aaa" }}>{stakeholder.focus.split(",")[0].trim()}</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {loading && <span style={{ fontSize: 11, color: stakeholder.color, fontFamily: "monospace" }}>generating...</span>}
+          {content && !loading && (
+            <>
+              <button onClick={() => navigator.clipboard.writeText(content)} style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, background: "#f5f6f8", color: "#888", border: "1px solid #e0e0e0", cursor: "pointer" }}>Copy</button>
+              <button onClick={onGenerate} style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, background: "transparent", color: stakeholder.color, border: `1px solid ${stakeholder.color}44`, cursor: "pointer", fontWeight: 600 }}>↺ Redo</button>
+              <button onClick={() => setExpanded(!expanded)} style={{ padding: "4px 10px", borderRadius: 6, fontSize: 11, background: "#f5f6f8", color: "#666", border: "1px solid #e0e0e0", cursor: "pointer" }}>{expanded ? "▲" : "▼"}</button>
+            </>
+          )}
+          {!content && !loading && (
+            <button onClick={onGenerate} disabled={!canGenerate}
+              style={{ padding: "6px 16px", borderRadius: 8, fontSize: 12, fontWeight: 700, background: canGenerate ? stakeholder.color : "#e8e8e8", color: canGenerate ? "#fff" : "#aaa", border: "none", cursor: canGenerate ? "pointer" : "not-allowed" }}>
+              Generate ↗
+            </button>
+          )}
+        </div>
+      </div>
+      {content && expanded && <div style={{ padding: "16px 18px", fontSize: 13, color: "#333", lineHeight: 1.9, whiteSpace: "pre-wrap", fontFamily: "Georgia, serif", background: "#fafafa" }}>{content}</div>}
+      {content && !expanded && <div style={{ padding: "10px 16px", fontSize: 12, color: "#888", cursor: "pointer" }} onClick={() => setExpanded(true)}>{content.slice(0, 140)}... <span style={{ color: stakeholder.color, fontWeight: 600 }}>Read more</span></div>}
+      {!content && !loading && <div style={{ padding: "8px 16px", fontSize: 11, color: "#ccc", fontStyle: "italic" }}>{canGenerate ? "Click Generate to create this message" : "Select a project above to unlock"}</div>}
+    </div>
+  );
+}
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages, loading]);
+// ── Stakeholder tab ───────────────────────────────────────────────────────────
 
-  const sendMessage = async (text) => {
-    const msg = (text || input).trim();
-    if (!msg || loading) return;
-    setInput(""); setError(null);
+function StakeholderTab({ localProject, localFeature, projectOutputs, featureOutputs }) {
+  const buildDefaultContext = () => {
+    const parts = [];
+    const fo = localFeature ? (featureOutputs[localFeature.id] || {}) : {};
+    if (localProject?.name)        parts.push("PROJECT: " + localProject.name);
+    if (localProject?.description) parts.push(localProject.description.slice(0, 200));
+    if (localFeature?.name)        parts.push("\nFEATURE: " + localFeature.name);
+    if (localFeature?.description) parts.push(localFeature.description.slice(0, 200));
+    if (fo.prd) {
+      const prd = typeof fo.prd === "string" ? fo.prd : JSON.stringify(fo.prd);
+      parts.push("\nPRD SUMMARY:\n" + prd.slice(0, 600));
+    } else if (projectOutputs.decision_log) {
+      const dl = typeof projectOutputs.decision_log === "string" ? projectOutputs.decision_log : JSON.stringify(projectOutputs.decision_log);
+      parts.push("\nDECISION LOG:\n" + dl.slice(0, 400));
+    }
+    return parts.join("\n").trim();
+  };
 
-    const updated = [...chatMessages, { role: "user", content: msg }];
-    setChatMessages(updated);
-    setLoading(true);
+  const [featureContext, setFeatureContext] = useState("");
+  const [loadingIds,     setLoadingIds]     = useState([]);
+  const [results,        setResults]        = useState({});
+  const [error,          setError]          = useState(null);
 
+  useEffect(() => {
+    setFeatureContext(buildDefaultContext());
+    setResults({});
+  }, [localProject?.id, localFeature?.id]);
+
+  const canGenerate = featureContext.trim().length > 0;
+
+  const generateFor = async (stakeholder) => {
+    if (!canGenerate) return;
+    setLoadingIds(prev => [...prev, stakeholder.id]);
+    setError(null);
     try {
-      const res = await apiFetch("/chat", {
+      const prompt = `You are a product manager communicating to a specific stakeholder.
+
+CONTEXT:
+${featureContext}
+
+STAKEHOLDER: ${stakeholder.label}
+THEIR FOCUS: ${stakeholder.focus}
+FORMAT: ${stakeholder.format}
+
+Write a clear, targeted message for this stakeholder. Focus only on what matters to them.
+Do not include a subject line or greeting — just the message body.
+Keep it concise and specific to their perspective.`;
+
+      const res  = await apiFetch("/enhance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages:        updated,
-          projectId:       localProject?.id || null,
-          activeFeatureId: localFeature?.id  || null,
-        }),
+        body: JSON.stringify({ prompt, maxTokens: 1000 }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setChatMessages(prev => [...prev, { role: "assistant", content: data.reply }]);
+      setResults(prev => ({ ...prev, [stakeholder.id]: data.result }));
     } catch (e) {
       setError(e.message);
-      setChatMessages(prev => [...prev, { role: "assistant", content: "Something went wrong. Is the backend running?" }]);
     } finally {
-      setLoading(false);
-      inputRef.current?.focus();
+      setLoadingIds(prev => prev.filter(id => id !== stakeholder.id));
     }
   };
 
-  const isEmpty       = chatMessages.length === 0;
-  const contextCount  = Object.keys(projectOutputs).length +
-    (localFeature ? Object.keys(featureOutputs[localFeature.id] || {}).length : 0);
+  return (
+    <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      <div style={{ width: 320, background: "#fff", borderRight: "1px solid #e8e8e8", display: "flex", flexDirection: "column", padding: 20, flexShrink: 0 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#1a1a2a", marginBottom: 4 }}>Stakeholder Translator</div>
+        <div style={{ fontSize: 12, color: "#888", lineHeight: 1.5, marginBottom: 14 }}>
+          Context is pre-loaded from your selected project and feature. Edit as needed, then generate targeted messages per stakeholder.
+        </div>
+        <div style={{ fontSize: 11, color: "#aaa", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Context</div>
+        <textarea value={featureContext} onChange={e => { setFeatureContext(e.target.value); setResults({}); }}
+          placeholder="Describe the feature or update you want to communicate..." rows={14}
+          style={{ width: "100%", background: "#f5f6f8", border: "1px solid #e0e0e0", borderRadius: 8, padding: "12px 14px", color: "#333", fontSize: 12, fontFamily: "inherit", lineHeight: 1.7, resize: "none", outline: "none", boxSizing: "border-box", marginBottom: 12 }} />
+        {error && <div style={{ padding: "10px 14px", background: "#FF444411", border: "1px solid #FF444433", borderRadius: 8, color: "#FF4444", fontSize: 12, marginBottom: 10 }}>❌ {error}</div>}
+        {canGenerate
+          ? <div style={{ fontSize: 12, color: "#00AA44", fontWeight: 600 }}>✓ Ready — click Generate on any card</div>
+          : <div style={{ fontSize: 12, color: "#bbb" }}>Select a project above or paste context here</div>}
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: 24, background: "#f5f6f8" }}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#1a1a2a", marginBottom: 2 }}>Stakeholder Messages</div>
+          <div style={{ fontSize: 12, color: "#888" }}>{Object.keys(results).length > 0 ? `${Object.keys(results).length} generated · click any card to expand` : "Generate a tailored message for each stakeholder"}</div>
+        </div>
+        {STAKEHOLDERS.map(s => (
+          <StakeholderCard key={s.id} stakeholder={s} content={results[s.id] || null} loading={loadingIds.includes(s.id)} canGenerate={canGenerate} onGenerate={() => generateFor(s)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+// ── Root with tabs ────────────────────────────────────────────────────────────
+
+const ASSISTANT_TABS = [
+  { id: "chat",        label: "🧠 Chat" },
+  { id: "stakeholder", label: "🔀 Stakeholder" },
+];
+
+export default function PMChat({ ps }) {
+  const { activeProject, activeFeature, projectOutputs, featureOutputs } = ps;
+
+  const [activeTab,    setActiveTab]    = useState("chat");
+  const [localProject, setLocalProject] = useState(activeProject);
+  const [localFeature, setLocalFeature] = useState(activeFeature);
+
+  useEffect(() => { if (activeProject && !localProject) setLocalProject(activeProject); }, [activeProject]);
+  useEffect(() => { if (activeFeature && !localFeature) setLocalFeature(activeFeature); }, [activeFeature]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 48px)", overflow: "hidden", background: "#f5f6f8" }}>
-
-      {/* Project/feature context selector */}
-      <ContextSelector
-        ps={ps}
-        selectedProject={localProject}
-        selectedFeature={localFeature}
-        onProjectChange={setLocalProject}
-        onFeatureChange={setLocalFeature}
-      />
-
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* Context panel */}
-        <ContextPanel
-          activeProject={localProject}
-          activeFeature={localFeature}
-          projectOutputs={projectOutputs}
-          featureOutputs={featureOutputs}
-        />
-
-        {/* Chat */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-
-          {/* Chat header */}
-          <div style={{ padding: "10px 18px", background: "#fff", borderBottom: "1px solid #e8e8e8", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "linear-gradient(135deg, #0066FF, #8B00FF)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, color: "#fff", fontWeight: 800 }}>P</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a2a" }}>PM Assistant</div>
-              <div style={{ fontSize: 11, color: "#00AA44", display: "flex", alignItems: "center", gap: 5 }}>
-                <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#00AA44", display: "inline-block" }} />
-                {localProject
-                  ? `${localProject.name}${localFeature ? ` · ${localFeature.name}` : ""} · ${contextCount} stage${contextCount !== 1 ? "s" : ""} loaded`
-                  : "Select a project above to load context"}
-              </div>
-            </div>
-            {chatMessages.length > 0 && (
-              <button onClick={clearChat} style={{ padding: "5px 10px", background: "none", border: "1px solid #e8e8e8", borderRadius: 6, fontSize: 11, color: "#999", cursor: "pointer" }}>
-                Clear
-              </button>
-            )}
-          </div>
-
-          {/* Messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-            {isEmpty && (
-              <div style={{ maxWidth: 540, margin: "0 auto" }}>
-                <div style={{ textAlign: "center", marginBottom: 24 }}>
-                  <div style={{ fontSize: 40, marginBottom: 8 }}>🧠</div>
-                  <div style={{ fontSize: 17, fontWeight: 800, color: "#1a1a2a", marginBottom: 4 }}>
-                    {localProject ? `Working on ${localProject.name}${localFeature ? ` · ${localFeature.name}` : ""}` : "PM Assistant"}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#999", lineHeight: 1.6 }}>
-                    {contextCount > 0
-                      ? `${contextCount} pipeline stage${contextCount > 1 ? "s" : ""} loaded. Ask me anything specific to this project.`
-                      : "Select a project above, or just ask me anything."}
-                  </div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
-                  {STARTERS.map((s, i) => (
-                    <button key={i} onClick={() => sendMessage(s.prompt)}
-                      style={{ padding: "10px 12px", borderRadius: 9, textAlign: "left", background: "#fff", border: "1px solid #e8e8e8", cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}
-                      onMouseOver={e => e.currentTarget.style.borderColor = "#0066FF44"}
-                      onMouseOut={e  => e.currentTarget.style.borderColor = "#e8e8e8"}>
-                      <div style={{ fontSize: 16, marginBottom: 2 }}>{s.icon}</div>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "#1a1a2a" }}>{s.label}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {chatMessages.map((m, i) => <MessageBubble key={i} message={m} />)}
-            {loading && <TypingDots />}
-            {error && <div style={{ textAlign: "center", fontSize: 11, color: "#FF4444", padding: 6 }}>❌ {error}</div>}
-            <div ref={bottomRef} />
-          </div>
-
-          {/* Input */}
-          <div style={{ padding: "12px 18px", background: "#fff", borderTop: "1px solid #e8e8e8", flexShrink: 0 }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-              <textarea ref={inputRef} value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                placeholder={contextCount > 0 ? "Ask about your PRD, tickets, risks, roadmap..." : "Ask anything about PM..."}
-                rows={2}
-                style={{ flex: 1, background: "#f5f6f8", border: "1.5px solid #e0e0e0", borderRadius: 10, padding: "10px 13px", color: "#1a1a2a", fontSize: 13, fontFamily: "inherit", lineHeight: 1.6, resize: "none", outline: "none", transition: "border-color 0.15s" }}
-                onFocus={e => e.target.style.borderColor = "#0066FF"}
-                onBlur={e  => e.target.style.borderColor = "#e0e0e0"}
-              />
-              <button onClick={() => sendMessage()} disabled={loading || !input.trim()}
-                style={{ width: 40, height: 40, flexShrink: 0, borderRadius: "50%", background: loading || !input.trim() ? "#e8e8e8" : "linear-gradient(135deg, #0066FF, #8B00FF)", border: "none", cursor: loading || !input.trim() ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, color: loading || !input.trim() ? "#bbb" : "#fff", transition: "all 0.2s" }}>
-                ↑
-              </button>
-            </div>
-            <div style={{ fontSize: 10, color: "#ccc", marginTop: 4, textAlign: "right" }}>Enter to send · Shift+Enter for new line</div>
-          </div>
+      <div style={{ background: "#fff", borderBottom: "1px solid #e8e8e8", flexShrink: 0 }}>
+        <div style={{ padding: "0 18px", display: "flex", alignItems: "center", gap: 4, height: 44, borderBottom: "1px solid #f0f0f0" }}>
+          {ASSISTANT_TABS.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              style={{ padding: "5px 14px", borderRadius: 8, fontSize: 13, cursor: "pointer", background: activeTab === tab.id ? "#1a1a2a" : "transparent", color: activeTab === tab.id ? "#fff" : "#666", border: "none", fontWeight: activeTab === tab.id ? 600 : 400, transition: "all 0.15s" }}>
+              {tab.label}
+            </button>
+          ))}
         </div>
+        <ContextSelector ps={ps} selectedProject={localProject} selectedFeature={localFeature} onProjectChange={setLocalProject} onFeatureChange={setLocalFeature} />
       </div>
+      {activeTab === "chat"        && <ChatTab ps={ps} localProject={localProject} localFeature={localFeature} />}
+      {activeTab === "stakeholder" && <StakeholderTab localProject={localProject} localFeature={localFeature} projectOutputs={projectOutputs} featureOutputs={featureOutputs} />}
     </div>
   );
 }
