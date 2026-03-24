@@ -3,10 +3,12 @@ export const CONSTRAINT_TYPES = ["Compliance", "Security", "Legal", "Operational
 export const SEVERITY_COLORS  = { Must: "#FF4444", Should: "#FF8800", "Nice to have": "#00AA44" };
 
 export const PROJECT_STAGES = [
-  { id: "competitor",      level: "project", icon: "🌐", label: "Competitor Intel",      color: "#FF8800", description: "Deep research · recent moves · gaps to exploit",        model: "gemini", useWebSearch: true },
-  { id: "market_analysis", level: "project", icon: "📊", label: "Market Analysis",        color: "#0066FF", description: "Market size · trends · target segments · growth signals", model: "gemini", useWebSearch: true },
-  { id: "roadmap",         level: "project", icon: "🗺️", label: "Product Roadmap",        color: "#8B00FF", description: "Phased delivery plan · milestones · dependencies" },
-  { id: "gtm",             level: "project", icon: "🚀", label: "Go To Market",            color: "#FF4444", description: "Launch strategy · positioning · channels · pricing" },
+  { id: "competitor",       level: "project", icon: "🌐", label: "Competitor Intel",   color: "#FF8800", description: "Deep research · recent moves · gaps to exploit",         useWebSearch: true },
+  { id: "market_analysis",  level: "project", icon: "📊", label: "Market Analysis",     color: "#0066FF", description: "Market size · trends · target segments · growth signals", useWebSearch: true },
+  { id: "feature_ideation", level: "project", icon: "💡", label: "Feature Ideation",    color: "#00AACC", description: "Winning features from competitive gaps · ranked by impact" },
+  { id: "decision_log",     level: "project", icon: "📋", label: "Decision Log",        color: "#8B00FF", description: "What we're building · what we're deferring · and why" },
+  { id: "roadmap",          level: "project", icon: "🗺️", label: "Product Roadmap",     color: "#FF4444", description: "Phased delivery plan · milestones · dependencies" },
+  { id: "gtm",              level: "project", icon: "🚀", label: "Go To Market",         color: "#00AA44", description: "Launch strategy · positioning · channels · pricing" },
 ];
 
 export const FEATURE_STAGES = [
