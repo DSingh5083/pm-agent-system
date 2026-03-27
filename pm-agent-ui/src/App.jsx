@@ -9,6 +9,7 @@ import PMPipeline from "./modules/PMPipeline/index.jsx";
 import PMChat     from "./modules/PMChat/index.jsx";
 import Docs       from "./modules/Docs/index.jsx";
 import Features   from "./modules/Features/index.jsx";
+import Monitor from "./modules/Monitor/index.jsx";
 
 // Writing removed from top nav — Enhance Writing is now inline on stage cards,
 // Stakeholder Translator lives in the Features tab.
@@ -18,6 +19,7 @@ const MODULES = [
   { id: "features", label: "Features",  icon: "⚙️" },
   { id: "chat",     label: "Assistant", icon: "🧠" },
   { id: "docs",     label: "Docs",      icon: "📄" },
+  { id: "monitor", label: "Monitor", icon: "📊" }
 ];
 
 function timeAgo(d) {
@@ -235,6 +237,7 @@ export default function App() {
             {activeModule === "features" && <Features   ps={ps} onGoToPipeline={() => { setActiveModule(prevModule || "pipeline"); ps.setActiveFeature(null); }} />}
             {activeModule === "chat"     && <PMChat     ps={ps} />}
             {activeModule === "docs"     && <Docs       ps={ps} />}
+            {activeModule === "monitor" && <Monitor />}
           </div>
         </div>
       </div>

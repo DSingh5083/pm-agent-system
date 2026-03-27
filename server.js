@@ -557,6 +557,128 @@ app.get("/debug/notion-config", (req, res) => {
   });
 });
 
+// These proxy LangSmith data to the frontend.
+ 
+app.get("/monitor/runs", async (req, res) => {
+  try {
+    const apiKey  = process.env.LANGCHAIN_API_KEY;
+    const project = process.env.LANGCHAIN_PROJECT || "pm-agent-system";
+    if (!apiKey) return res.status(503).json({ error: "LANGCHAIN_API_KEY not configured" });
+ 
+    const limit = parseInt(req.query.limit) || 50;
+ 
+    const response = await fetch(
+      `https://api.smith.langchain.com/runs?project_name=${encodeURIComponent(project)}&limit=${limit}&run_type=llm`,
+      { headers: { "x-api-key": apiKey } }
+    );
+ 
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(response.status).json({ error: text });
+    }
+ 
+    const runs = await response.json();
+ 
+    // Shape the data for the frontend
+    const shaped = runs.map(r => ({
+      id:            r.id,
+      name:          r.name,
+      startTime:     r.start_time,
+      endTime:       r.end_time,
+      latencyMs:     r.latency_ms || (r.end_time && r.start_time ? new Date(r.end_time) - new Date(r.start_time) : null),
+      inputTokens:   r.extra?.metadata?.input_tokens  || 0,
+      outputTokens:  r.extra?.metadata?.output_tokens || 0,
+      totalTokens:   r.extra?.metadata?.total_tokens  || 0,
+      costUsd:       r.extra?.metadata?.cost_usd      || 0,
+      model:         r.extra?.metadata?.model         || "unknown",
+      stageId:       r.extra?.metadata?.stage_id      || r.name,
+      stageLabel:    r.extra?.metadata?.stage_label   || r.name,
+      projectName:   r.extra?.metadata?.project_name  || "unknown",
+      featureName:   r.extra?.metadata?.feature_name  || null,
+      isError:       r.extra?.metadata?.is_error      || !!r.error,
+      errorType:     r.extra?.metadata?.error_type    || null,
+      errorMessage:  r.error || null,
+      status:        r.status,
+    }));
+ 
+    res.json({ runs: shaped, count: shaped.length });
+  } catch (e) {
+    console.error("Monitor runs error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+ 
+app.get("/monitor/stats", async (req, res) => {
+  try {
+    const apiKey  = process.env.LANGCHAIN_API_KEY;
+    const project = process.env.LANGCHAIN_PROJECT || "pm-agent-system";
+    if (!apiKey) return res.status(503).json({ error: "LANGCHAIN_API_KEY not configured" });
+ 
+    // Fetch last 200 runs for stats aggregation
+    const response = await fetch(
+      `https://api.smith.langchain.com/runs?project_name=${encodeURIComponent(project)}&limit=200&run_type=llm`,
+      { headers: { "x-api-key": apiKey } }
+    );
+ 
+    if (!response.ok) return res.status(response.status).json({ error: "LangSmith API error" });
+ 
+    const runs = await response.json();
+ 
+    // Aggregate stats
+    const totalRuns    = runs.length;
+    const errorRuns    = runs.filter(r => r.extra?.metadata?.is_error || r.error).length;
+    const rateLimitHits = runs.filter(r => r.extra?.metadata?.error_type === "rate_limit").length;
+    const totalTokens  = runs.reduce((s, r) => s + (r.extra?.metadata?.total_tokens  || 0), 0);
+    const totalCost    = runs.reduce((s, r) => s + (r.extra?.metadata?.cost_usd       || 0), 0);
+    const avgLatency   = runs.length
+      ? Math.round(runs.reduce((s, r) => s + (r.extra?.metadata?.latency_ms || 0), 0) / runs.length)
+      : 0;
+ 
+    // Tokens by stage
+    const byStage = {};
+    runs.forEach(r => {
+      const label = r.extra?.metadata?.stage_label || r.name;
+      if (!byStage[label]) byStage[label] = { runs: 0, tokens: 0, errors: 0, cost: 0 };
+      byStage[label].runs   += 1;
+      byStage[label].tokens += r.extra?.metadata?.total_tokens || 0;
+      byStage[label].errors += (r.extra?.metadata?.is_error || r.error) ? 1 : 0;
+      byStage[label].cost   += r.extra?.metadata?.cost_usd || 0;
+    });
+ 
+    // Tokens over time — group by hour for chart
+    const tokensByHour = {};
+    runs.forEach(r => {
+      if (!r.start_time) return;
+      const hour = new Date(r.start_time);
+      hour.setMinutes(0, 0, 0);
+      const key = hour.toISOString();
+      if (!tokensByHour[key]) tokensByHour[key] = { time: key, tokens: 0, runs: 0, errors: 0 };
+      tokensByHour[key].tokens += r.extra?.metadata?.total_tokens || 0;
+      tokensByHour[key].runs   += 1;
+      tokensByHour[key].errors += (r.extra?.metadata?.is_error || r.error) ? 1 : 0;
+    });
+ 
+    const timeline = Object.values(tokensByHour).sort((a, b) => new Date(a.time) - new Date(b.time));
+ 
+    res.json({
+      summary: {
+        totalRuns,
+        errorRuns,
+        rateLimitHits,
+        totalTokens,
+        totalCost:   parseFloat(totalCost.toFixed(4)),
+        avgLatency,
+        successRate: totalRuns ? Math.round(((totalRuns - errorRuns) / totalRuns) * 100) : 100,
+      },
+      byStage:  Object.entries(byStage).map(([label, v]) => ({ label, ...v, cost: parseFloat(v.cost.toFixed(4)) })),
+      timeline,
+    });
+  } catch (e) {
+    console.error("Monitor stats error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── DISCOVERY INTERVIEW ───────────────────────────────────────────────────────
 
 app.post("/projects/:id/discovery-interview", async (req, res) => {
