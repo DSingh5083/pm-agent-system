@@ -6,11 +6,13 @@
 import pg from "pg";
 const { Pool } = pg;
 
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-  max: 5,
-});
+import { parse } from "pg-connection-string";
+
+const dbConfig = process.env.DATABASE_URL
+  ? { ...parse(process.env.DATABASE_URL), ssl: { rejectUnauthorized: false }, max: 5 }
+  : { connectionString: "postgresql://localhost:5432/pm_agent", max: 5 };
+
+export const pool = new Pool(dbConfig);
 
 // ── initDb ────────────────────────────────────────────────────────────────────
 // Only creates NEW tables (embeddings). Never alters existing ones.
