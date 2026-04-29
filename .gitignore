@@ -6,3 +6,15 @@ dist/
 .DS_Store
 pm-agent-ui/node_modules/
 pm-agent-ui/dist/
+
+# Claude Code local settings (may contain personal allow rules)
+.claude/settings.local.json
+
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/*.tfplan
+*.pem

@@ -1,0 +1,35 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# NEVER commit terraform.tfvars to git — it contains secrets.
+
+aws_region        = "us-east-1"
+project_name      = "pm-agent"
+environment       = "production"
+
+# EC2
+ec2_instance_type = "t3.medium"
+ec2_key_pair_name = "your-key-pair-name"   # Must exist in your AWS account
+allowed_ssh_cidr  = "YOUR_IP/32"            # Restrict to your IP for security
+
+# RDS
+db_instance_class    = "db.t3.micro"
+db_name              = "pm_agent"
+db_username          = "pm_agent_user"
+db_password          = "ChangeMe!SuperSecure123"
+db_allocated_storage = 20
+
+# API Keys (copy from your local .env)
+anthropic_api_key  = "sk-ant-api03-..."
+gemini_api_key     = "AIzaSy..."
+openai_api_key     = "sk-proj-..."
+notion_api_key     = "ntn_..."
+notion_database_id = "your-notion-db-id"
+voyage_api_key     = "pa-..."
+google_api_key     = "AIzaSy..."
+google_pse_cx      = "your-pse-cx"
+langchain_api_key  = "lsv2_pt_..."
+langchain_project  = "pm-agent-system"
+app_password       = "YourAppPassword"
+
+# Set this to your Vercel frontend URL if you keep the UI on Vercel,
+# or leave empty to use the EC2 public IP automatically.
+frontend_url = ""

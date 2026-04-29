@@ -1,0 +1,62 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(*.env)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(nano.env)",
+      "Read(**/nano.env)",
+
+      "Read(terraform.tfvars)",
+      "Read(**/terraform.tfvars)",
+      "Read(terraform.tfstate)",
+      "Read(terraform.tfstate.backup)",
+      "Read(**/terraform.tfstate)",
+      "Read(**/terraform.tfstate.backup)",
+
+      "Read(*.pem)",
+      "Read(*.key)",
+      "Read(*.p12)",
+      "Read(*.pfx)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/*.p12)",
+      "Read(**/*.pfx)",
+
+      "Read(id_rsa)",
+      "Read(id_ed25519)",
+      "Read(id_dsa)",
+      "Read(id_ecdsa)",
+      "Read(**/id_rsa)",
+      "Read(**/id_ed25519)",
+
+      "Read(credentials)",
+      "Read(credentials.json)",
+      "Read(**/credentials.json)",
+      "Read(**/service-account*.json)",
+      "Read(**/*-sa.json)",
+
+      "Read(.netrc)",
+      "Read(.npmrc)",
+      "Read(.pypirc)",
+      "Read(auth.json)",
+      "Read(**/*.token)",
+      "Read(*.keystore)",
+      "Read(*.jks)",
+
+      "Bash(cat .env*)",
+      "Bash(cat *.env)",
+      "Bash(cat terraform.tfvars)",
+      "Bash(cat terraform.tfstate*)",
+      "Bash(cat *.pem)",
+      "Bash(cat *.key)",
+      "Bash(cat id_rsa*)",
+      "Bash(cat id_ed25519*)",
+      "Bash(cat credentials*)",
+      "Bash(cat .netrc)",
+      "Bash(cat .npmrc)"
+    ]
+  }
+}

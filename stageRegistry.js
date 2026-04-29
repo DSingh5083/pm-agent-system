@@ -15,6 +15,7 @@ export const STAGES = [
     label:        "Competitor Intel",
     color:        "#FF8800",
     description:  "Deep research · recent moves · gaps to exploit",
+    model:        "gemini-2.0-flash",
     useWebSearch: true,
     prompt: (ctx) => [
       "You are a senior competitive intelligence analyst. Research the competitive landscape for this product:",
@@ -56,6 +57,7 @@ export const STAGES = [
     label:        "Market Analysis",
     color:        "#0066FF",
     description:  "Market size · trends · target segments · growth signals",
+    model:        "gemini-2.0-flash",
     useWebSearch: true,
     prompt: (ctx) => [
       "You are a market research analyst. Analyse the market for:",
@@ -98,6 +100,7 @@ export const STAGES = [
     label:       "Feature Ideation",
     color:       "#00AACC",
     description: "Winning features from competitive gaps · ranked by impact",
+    model:        "gemini-2.0-flash",
     useWebSearch: false,
     prompt: (ctx) => [
       "You are a senior product strategist. Your job is to generate a prioritised list of features that would win in this market.",

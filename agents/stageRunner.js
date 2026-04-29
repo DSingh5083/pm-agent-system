@@ -115,6 +115,7 @@ Rules:
 - All external claims must include a [Source URL] or be flagged as [Unverified].
 - Be specific. Use actual product names, user segments, and metrics from the project context.
 - Challenge vague goals. If something is unclear or risky, say so directly.
+- review what was written critically and point out any potential issues, gaps, or areas that need more clarity or detail.
 `.trim();
 
 // ── Sleep helper ──────────────────────────────────────────────────────────────
